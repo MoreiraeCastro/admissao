@@ -1,9 +1,9 @@
 from pydantic import BaseModel
 
-# Campos preenchidos pela IA a partir dos documentos. Usado para filtrar a
-# resposta do prompt de extração — os campos de folha de pagamento (abaixo,
-# em DadosAdmissao) são preenchidos manualmente pelo RH, não pela IA.
+# Campos que a IA procura nos documentos. Usado para filtrar a resposta do prompt de
+# extração — o resto de DadosAdmissao é preenchido pelo RH ou calculado (dominio.py).
 CAMPOS_ADMISSAO = [
+    # Identificação (RG, CPF, CNH, CIN)
     "nome_completo",
     "cpf",
     "rg",
@@ -14,8 +14,11 @@ CAMPOS_ADMISSAO = [
     "sexo",
     "naturalidade_cidade",
     "naturalidade_uf",
+    "nacionalidade",
+    "pais_nascimento",
     "nome_mae",
     "nome_pai",
+    # Comprovante de residência
     "endereco_logradouro",
     "endereco_numero",
     "endereco_complemento",
@@ -23,6 +26,20 @@ CAMPOS_ADMISSAO = [
     "endereco_cidade",
     "endereco_uf",
     "endereco_cep",
+    # Outros documentos, quando enviados
+    "estado_civil",  # certidão de casamento / averbação
+    "grau_instrucao",  # diploma, certificado, histórico
+    "numero_ctps",  # CTPS (contrato)
+    "serie_ctps",
+    "conta_corrente",  # cartão/extrato/comprovante bancário
+    "digito_conta",
+    "tipo_conta",
+    "deficiente_fisico",  # laudo PcD
+    "email",  # ficha cadastral, formulário, conta
+    "ddd_telefone",
+    "telefone",
+    "ddd_contato_2",
+    "contato_2",
 ]
 
 
@@ -103,6 +120,13 @@ class DadosAdmissao(BaseModel):
     estado_civil: str = ""
     recebia_seguro_desemprego: str = ""
     tipo_endereco: str = ""
+
+    # --- Códigos de tabela do Domínio (calculados a partir de cidade/UF/país; o RH pode corrigir) ---
+    codigo_municipio_endereco: str = ""
+    codigo_municipio_nascimento: str = ""
+    pais_nacionalidade: str = ""
+    pais_endereco: str = ""
+    pais_nascimento: str = ""
 
     email: str = ""
     ddd_telefone: str = ""

@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from docx import Document
 from num2words import num2words
 
+import dominio
 from models import CAMPOS_ADMISSAO, DadosAdmissao, GerarArquivosResponse
 
 load_dotenv()
@@ -102,6 +103,8 @@ Analise cuidadosamente os documentos fornecidos e devolva a resposta APENAS como
   "sexo": "",
   "naturalidade_cidade": "",
   "naturalidade_uf": "",
+  "nacionalidade": "",
+  "pais_nascimento": "",
   "nome_mae": "",
   "nome_pai": "",
   "endereco_logradouro": "",
@@ -110,7 +113,21 @@ Analise cuidadosamente os documentos fornecidos e devolva a resposta APENAS como
   "endereco_bairro": "",
   "endereco_cidade": "",
   "endereco_uf": "",
-  "endereco_cep": ""
+  "endereco_cep": "",
+  "estado_civil": "",
+  "grau_instrucao": "",
+  "numero_ctps": "",
+  "serie_ctps": "",
+  "banco_identificado": "",
+  "conta_corrente": "",
+  "digito_conta": "",
+  "tipo_conta": "",
+  "deficiente_fisico": "",
+  "email": "",
+  "ddd_telefone": "",
+  "telefone": "",
+  "ddd_contato_2": "",
+  "contato_2": ""
 }
 
 Regras:
@@ -118,9 +135,16 @@ Regras:
 - Formate o CPF como 000.000.000-00 quando encontrado.
 - Formate datas como DD/MM/AAAA.
 - "sexo" deve ser "Masculino" ou "Feminino" quando identificável.
-- "rg_orgao_emissor" é a sigla do órgão emissor (ex: "SSP"), separada da UF, que vai em "rg_uf_emissor" (ex: "RJ").
-- "naturalidade_cidade" e "naturalidade_uf" vêm separados (ex: cidade "Rio de Janeiro", uf "RJ").
-- Os campos "endereco_*" vêm cada um separado (não junte tudo num só campo). "endereco_cep" apenas números.
+- "rg_orgao_emissor" é a sigla do órgão emissor (ex: "SSP", "DETRAN"), separada da UF, que vai em "rg_uf_emissor" (ex: "RJ").
+- "naturalidade_cidade" e "naturalidade_uf" vêm separados (ex: cidade "Rio de Janeiro", uf "RJ"). UFs sempre como sigla de 2 letras.
+- "nacionalidade" em texto para o contrato (ex: "brasileira"); "pais_nascimento" é o nome do país de nascimento (ex: "BRASIL"), só se o documento mostrar ou se a naturalidade for uma cidade brasileira.
+- Os campos "endereco_*" vêm cada um separado (não junte tudo num só campo). "endereco_logradouro" inclui o tipo (ex: "Rua das Flores", "Avenida Brasil"). "endereco_cep" apenas números.
+- "estado_civil": só preencha com base em certidão de casamento, averbação de divórcio/separação, certidão de óbito do cônjuge ou declaração de união estável — use o código: S=Solteiro, C=Casado, V=Viúvo, D=Divorciado, J=Separado judicialmente, U=União estável. Certidão de nascimento sozinha NÃO prova estado civil: deixe vazio.
+- "grau_instrucao": só com diploma, certificado de conclusão ou histórico escolar — use o código: 1=Analfabeto, 2=Primário (fundamental I) incompleto, 3=Primário completo, 4=Ginásio (fundamental II) incompleto, 5=Ginásio completo, 6=2º grau (médio) incompleto, 7=2º grau completo, 8=Superior incompleto, 9=Superior completo, 13=Pós-graduação, 10=Mestrado, 11=Doutorado.
+- "numero_ctps" e "serie_ctps" da Carteira de Trabalho, quando enviada.
+- Dados bancários só de cartão, extrato ou comprovante bancário em nome do colaborador: "banco_identificado" com nome e número do banco (ex: "Itaú (341)"), "conta_corrente" só os dígitos da conta sem o dígito verificador, "digito_conta" o dígito verificador, "tipo_conta" com o código 2=Conta corrente, 3=Conta salário, 4=Conta poupança.
+- "deficiente_fisico": "1" apenas se houver laudo médico de deficiência; caso contrário deixe vazio.
+- Telefones: DDD (2 dígitos) separado do número, apenas dígitos.
 - Responda SOMENTE com o objeto JSON."""
 
 IMAGE_MEDIA_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}
@@ -245,8 +269,33 @@ async def extrair_dados(documentos: List[UploadFile] = File(...)):
             ),
         )
 
-    dados = DadosAdmissao(**{k: dados_brutos.get(k, "") or "" for k in CAMPOS_ADMISSAO})
-    return dados.model_dump()
+    dados = DadosAdmissao(**{k: str(dados_brutos.get(k) or "") for k in CAMPOS_ADMISSAO})
+    # Já devolve conferido contra a planilha do Domínio: códigos (país, estado civil…), calculados e pendências.
+    resposta = _resultado_json(dominio.preparar(dados.model_dump()))
+    resposta["banco_identificado"] = str(dados_brutos.get("banco_identificado") or "")
+    return resposta
+
+
+def _resultado_json(resultado: dominio.Resultado) -> dict:
+    return {
+        "dados": resultado.dados,
+        "calculados": resultado.calculados,
+        "erros": resultado.erros,
+        "avisos": resultado.avisos,
+        "dicas": resultado.dicas,
+    }
+
+
+@app.get("/api/campos")
+async def campos():
+    """Regras de cada campo (posição no layout, obrigatoriedade, opções do dicionário) — o frontend monta o formulário daqui."""
+    return dominio.metadados_campos()
+
+
+@app.post("/api/validar")
+async def validar(dados: DadosAdmissao):
+    """Confere os dados contra a planilha do Domínio sem gerar nada (o frontend chama enquanto o RH digita)."""
+    return _resultado_json(dominio.preparar(dados.model_dump()))
 
 
 # --------------------------------------------------------------------------
@@ -368,181 +417,24 @@ def gerar_contrato_docx(dados: DadosAdmissao, destino: Path) -> None:
     doc.save(str(destino))
 
 
-with open(BASE_DIR / "data" / "municipios_dominio.json", encoding="utf-8") as _f:
-    _MUNICIPIOS_DOMINIO: dict[str, int] = json.load(_f)
-
-PAIS_BRASIL_CODIGO = "30"  # Código do Brasil na aba "Código dos países" do Domínio.
-
-
-def _codigo_municipio(nome_cidade: str) -> str:
-    """Busca exata (sem acento/caixa) na tabela oficial de municípios do Domínio.
-
-    Só preenche quando encontra correspondência exata — na dúvida, deixa em
-    branco para o RH completar manualmente, em vez de arriscar um código errado.
+def gerar_layout_dominio(dados: dict, destino: Path) -> None:
+    """Gera o "empregados.txt" exatamente como a macro "Gerar" da planilha oficial do
+    Domínio: as 78 colunas de uma linha separadas por TAB, sem cabeçalho, em ANSI
+    (cp1252, o que o `Print #` do VBA grava no Windows) e quebra de linha CRLF.
     """
-    if not nome_cidade:
-        return ""
-    chave = unicodedata.normalize("NFKD", nome_cidade).encode("ascii", "ignore").decode("ascii").strip().upper()
-    codigo = _MUNICIPIOS_DOMINIO.get(chave)
-    return str(codigo) if codigo is not None else ""
-
-
-def _somente_digitos(valor: str) -> str:
-    return re.sub(r"\D", "", valor or "")
-
-
-def _mapear_sexo_dominio(sexo: str) -> str:
-    s = (sexo or "").strip().lower()
-    if s.startswith("m"):
-        return "M"
-    if s.startswith("f"):
-        return "F"
-    return ""
-
-
-# Posição (1-indexado, conforme o "Dicionário dos campos" do Domínio) -> valor.
-# Campos documentais vêm da extração por IA; campos de folha de pagamento vêm
-# do preenchimento manual do RH na tela de validação (ambos no mesmo objeto
-# DadosAdmissao — ver models.py).
-def _montar_linha_dominio(dados: DadosAdmissao) -> list[str]:
-    campos: dict[int, str] = {
-        1: "0",  # Código empresa — instrução do próprio Domínio: sempre 0.
-        2: dados.codigo_empregado,
-        3: dados.nome_completo,
-        4: _somente_digitos(dados.cpf),
-        5: dados.codigo_filial,
-        6: dados.codigo_servico,
-        7: dados.codigo_cargo,
-        8: dados.codigo_departamento,
-        9: dados.codigo_centro_custos,
-        10: dados.salario,
-        11: dados.data_admissao,
-        12: dados.codigo_esocial_empregado,
-        13: dados.vinculo_empregaticio,
-        14: dados.optante_fgts,
-        15: dados.data_opcao_fgts,
-        16: dados.ocorrencia_sefip,
-        17: dados.endereco_logradouro,
-        18: dados.endereco_numero,
-        19: dados.endereco_complemento,
-        20: dados.endereco_bairro,
-        21: dados.endereco_cidade,
-        22: dados.endereco_uf,
-        23: _somente_digitos(dados.endereco_cep),
-        24: dados.data_nascimento,
-        25: dados.codigo_banco,
-        26: dados.conta_corrente,
-        27: dados.digito_conta,
-        28: dados.tipo_conta,
-        29: dados.codigo_convenio_coletivo,
-        30: dados.multiplos_vinculos,
-        31: dados.pagou_contribuicao_sindical,
-        32: dados.vencimento_ferias,
-        33: dados.horas_dia,
-        34: dados.categoria,
-        35: dados.tipo_indicativo_admissao,
-        36: dados.grau_instrucao,
-        37: dados.deficiente_fisico,
-        38: dados.tipo_admissao,
-        39: dados.horas_semana,
-        40: dados.forma_pagamento,
-        41: dados.horas_mes,
-        42: dados.situacao_qualificacao_cadastral,
-        43: _mapear_sexo_dominio(dados.sexo),
-        44: PAIS_BRASIL_CODIGO,  # País nacionalidade — assumimos Brasil por padrão.
-        45: dados.raca_cor,
-        46: dados.estado_civil,
-        47: dados.recebia_seguro_desemprego,
-        48: dados.codigo_jornada,
-        49: dados.nome_pai,
-        50: dados.nome_mae,
-        51: dados.tipo_endereco,
-        52: _codigo_municipio(dados.endereco_cidade),
-        53: _codigo_municipio(dados.naturalidade_cidade),
-        54: PAIS_BRASIL_CODIGO,  # País do endereço.
-        55: PAIS_BRASIL_CODIGO,  # País de nascimento.
-        # Na CIN (nova identidade unificada) o número do RG às vezes não existe —
-        # nesse caso o CPF passa a ser o próprio número de identidade. Só cai para o
-        # CPF quando o RG realmente não veio de nenhum documento.
-        56: dados.rg.strip() or dados.cpf,
-        57: dados.rg_orgao_emissor,
-        58: dados.rg_uf_emissor,
-        59: dados.rg_data_emissao,
-        60: dados.contrato_experiencia,
-        61: dados.clausula_assecuratoria,
-        62: dados.dias_contrato_experiencia,
-        63: dados.inicio_prazo_determinado,
-        64: dados.fim_prazo_determinado,
-        65: dados.dias_prorrogacao,
-        66: dados.prorrogacao_prazo_determinado,
-        67: dados.motivo_prorrogacao,
-        68: dados.forma_calculo_pagamento,
-        69: dados.atividade_simples_nacional,
-        70: dados.email,
-        71: dados.ddd_telefone,
-        72: dados.telefone,
-        73: dados.ddd_contato_2,
-        74: dados.contato_2,
-        75: dados.data_admissao,  # Data Vantagem — o layout exige a mesma data da admissão.
-        76: dados.naturalidade_uf,
-        77: dados.codigo_categoria_esocial,
-        78: dados.codigo_sindicato_cadastro,
-    }
-    return [campos.get(pos, "") for pos in range(1, 79)]
-
-
-def gerar_layout_dominio(dados: DadosAdmissao, destino: Path) -> None:
-    """Gera o "empregados.txt" no layout oficial de importação de admissão do
-    Domínio Web: 78 colunas separadas por TAB, sem cabeçalho, uma linha por
-    empregado (mesmo formato que a macro da planilha modelo do escritório gera).
-
-    Campos documentais vêm da extração por IA; campos de folha de pagamento
-    vêm do preenchimento manual do RH. O que não for preenchido em nenhum dos
-    dois fica em branco, para o RH completar dentro do próprio Domínio Web.
-    """
-    linha = "\t".join(_montar_linha_dominio(dados))
     with destino.open("w", encoding="cp1252", errors="replace", newline="\r\n") as f:
-        f.write(linha + "\n")
+        f.write("\t".join(dominio.linha(dados)) + "\n")
 
 
-# Rótulos curtos das 78 posições (mesma numeração do "Dicionário dos campos"),
-# usados só no arquivo de conferência legível — o .txt oficial não tem rótulos.
-FIELD_LABELS_DOMINIO = [
-    "Código empresa", "Código empregado", "Nome", "CPF", "Código filial",
-    "Código serviço", "Código cargo", "Código departamento", "Centro de custos",
-    "Salário", "Data admissão", "Código eSocial", "Vínculo empregatício",
-    "Optante FGTS", "Data opção FGTS", "Ocorrência SEFIP", "Endereço",
-    "Número endereço", "Complemento", "Bairro", "Cidade", "UF", "CEP",
-    "Data nascimento", "Código banco", "Conta corrente", "Dígito conta",
-    "Tipo de conta", "Convenção coletiva", "Múltiplos vínculos",
-    "Pagou contr. sindical", "Vencimento férias", "Horas dia", "Categoria",
-    "Tipo indicativo admissão", "Grau instrução", "Deficiente físico",
-    "Tipo de admissão", "Horas semana", "Forma pagamento", "Horas mês",
-    "Situação qualificação cadastral", "Sexo", "País nacionalidade",
-    "Raça/Cor", "Estado civil", "Recebia seguro desemprego", "Código jornada",
-    "Nome do pai", "Nome da mãe", "Tipo de endereço",
-    "Código município endereço", "Código município nascimento",
-    "Código país endereço", "Código país nascimento", "Identidade (RG)",
-    "Órgão expedição RG", "UF expedição RG", "Data expedição RG",
-    "Contrato de experiência", "Cláusula assecuratória",
-    "Dias contrato experiência", "Início prazo determinado",
-    "Fim prazo determinado", "Dias prorrogação",
-    "Prorrogação prazo determinado", "Motivo prorrogação",
-    "Forma pagamento (mês/semana)", "Atividade simples nacional", "E-mail",
-    "DDD telefone", "Telefone", "DDD contato 2", "Contato 2", "Data Vantagem",
-    "UF nascimento", "Código categoria eSocial", "Código sindicato",
-]
-
-
-def gerar_conferencia_dominio(dados: DadosAdmissao, destino: Path) -> None:
+def gerar_conferencia_dominio(dados: dict, destino: Path) -> None:
     """Versão legível (com rótulos) das mesmas 78 posições do arquivo oficial,
     só para o RH conferir visualmente antes de importar — não é o arquivo que
     vai pro Domínio (esse é o layout_dominio.txt, cru e sem rótulos).
     """
-    valores = _montar_linha_dominio(dados)
+    valores = dominio.linha(dados)
     linhas = [
-        f"{pos:02d} - {label}: {valor}"
-        for pos, (label, valor) in enumerate(zip(FIELD_LABELS_DOMINIO, valores), start=1)
+        f"{p.pos:02d} - {p.rotulo}: {valor}"
+        for p, valor in zip(dominio.POSICOES, valores)
         if valor
     ]
     destino.write_text("\n".join(linhas) + "\n", encoding="utf-8")
@@ -550,8 +442,17 @@ def gerar_conferencia_dominio(dados: DadosAdmissao, destino: Path) -> None:
 
 @app.post("/api/gerar", response_model=GerarArquivosResponse)
 async def gerar_arquivos(dados: DadosAdmissao):
-    if not dados.nome_completo.strip():
-        raise HTTPException(status_code=400, detail="nome_completo é obrigatório.")
+    resultado = dominio.preparar(dados.model_dump())
+    if resultado.erros:
+        # O TXT só sai quando bate 100% com a planilha do Domínio — senão a importação falha lá dentro.
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": f"{len(resultado.erros)} campo(s) precisam de correção antes de gerar o arquivo do Domínio.",
+                **_resultado_json(resultado),
+            },
+        )
+    dados_finais = DadosAdmissao(**resultado.dados)
 
     job_id = uuid.uuid4().hex
     job_dir = GENERATED_DIR / job_id
@@ -561,13 +462,13 @@ async def gerar_arquivos(dados: DadosAdmissao):
     dominio_path = job_dir / "layout_dominio.txt"
     conferencia_path = job_dir / "conferencia_dominio.txt"
 
-    gerar_contrato_docx(dados, docx_path)
-    gerar_layout_dominio(dados, dominio_path)
-    gerar_conferencia_dominio(dados, conferencia_path)
+    gerar_contrato_docx(dados_finais, docx_path)
+    gerar_layout_dominio(resultado.dados, dominio_path)
+    gerar_conferencia_dominio(resultado.dados, conferencia_path)
 
     # Nome-base usado nos arquivos baixados: {nomedocolaborador}_{ddmmyyyy} (data de
     # geração dos documentos — a mesma convenção que será usada na pasta do cloud).
-    base_nome = f"{_slugify_nome(dados.nome_completo)}_{date.today().strftime('%d%m%Y')}"
+    base_nome = f"{_slugify_nome(dados_finais.nome_completo)}_{date.today().strftime('%d%m%Y')}"
 
     JOBS_META[job_id] = {"base_nome": base_nome}
 

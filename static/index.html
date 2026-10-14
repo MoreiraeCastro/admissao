@@ -174,7 +174,6 @@
   }
   .field select{font-family:'Inter',sans-serif;font-size:13px;}
   .field input:focus, .field select:focus{outline:none;border-color:var(--accent); background: var(--surface); box-shadow: 0 0 0 3px var(--accent-soft);}
-  .field.warn input{border-color:var(--warn);background:var(--warn-soft);}
   .field-flag{
     font-size:11.5px;color:var(--warn);margin-top:6px;display:flex;align-items:center;gap:4px; font-weight: 500;
   }
@@ -228,6 +227,19 @@
   .field{animation:fade-in-up .2s ease both;}
 
   footer{margin-top:40px;font-size:13px;color:var(--ink-faint);text-align:center;}
+
+  .field label .req{color:var(--accent);font-weight:600;}
+  .field label .pos{float:right;font-size:10.5px;color:var(--ink-faint);font-family:'IBM Plex Mono',monospace;font-weight:400;}
+  .field-msg{font-size:11.5px;margin:6px 0 0;min-height:0;color:var(--ink-muted);}
+  .field.auto .field-msg{color:var(--navy);}
+  .field.auto input, .field.auto select{border-color:var(--navy-soft);background:var(--navy-soft);}
+  .field.missing input, .field.missing select{border-color:var(--warn);}
+  .field.err input, .field.err select{border-color:var(--danger);background:var(--danger-soft);}
+  .field.err .field-msg{color:var(--danger);font-weight:500;}
+  .field.warn .field-msg{color:var(--warn);font-weight:500;}
+  .resumo{font-size:13px;padding:10px 12px;border-radius:8px;margin:0;}
+  .resumo.pendente{background:var(--warn-soft);color:var(--warn);}
+  .resumo.ok{background:var(--navy-soft);color:var(--navy);font-weight:500;}
 </style>
 </head>
 <body>
@@ -275,6 +287,7 @@
         <div id="fieldsGrid"></div>
 
         <div class="result-footer">
+          <p class="resumo" id="resumoConferencia"></p>
           <div class="button-group" id="validationActions">
             <button class="primary" id="generateBtn" style="flex:1;">Aprovar e Gerar Contratos</button>
             <button class="ghost" id="copyBtn" title="Copiar JSON interno">{}</button>
@@ -297,6 +310,8 @@
 </div>
 
 <script>
+// Grupos/rótulos do formulário. Opções, obrigatoriedade (*) e posição no layout vêm do
+// servidor (GET api/campos → dominio.py), que é a fonte única das regras da planilha do Domínio.
 const FIELD_GROUPS = [
   {
     title: 'Dados pessoais',
@@ -304,15 +319,18 @@ const FIELD_GROUPS = [
       {key:'nome_completo', label:'Nome completo', full:true},
       {key:'cpf', label:'CPF'},
       {key:'data_nascimento', label:'Data de nascimento'},
-      {key:'sexo', label:'Sexo', hint:true},
+      {key:'sexo', label:'Sexo'},
+      {key:'estado_civil', label:'Estado civil'},
       {key:'naturalidade_cidade', label:'Naturalidade (cidade)'},
-      {key:'naturalidade_uf', label:'Naturalidade (UF)'}
+      {key:'naturalidade_uf', label:'Naturalidade (UF)'},
+      {key:'nacionalidade', label:'Nacionalidade (texto do contrato)'},
+      {key:'grau_instrucao', label:'Grau de instrução', full:true}
     ]
   },
   {
     title: 'Documento de identidade (RG)',
     fields: [
-      {key:'rg', label:'RG', hint:true},
+      {key:'rg', label:'RG'},
       {key:'rg_orgao_emissor', label:'Órgão emissor'},
       {key:'rg_uf_emissor', label:'UF emissor'},
       {key:'rg_data_emissao', label:'Data de expedição'}
@@ -338,166 +356,116 @@ const FIELD_GROUPS = [
     ]
   },
   {
-    title: 'Dados para o contrato (preencher manualmente)',
+    title: 'Contato',
     fields: [
-      {key:'nacionalidade', label:'Nacionalidade', manual:true},
-      {key:'funcao', label:'Função', manual:true},
-      {key:'numero_ctps', label:'Número da CTPS', manual:true},
-      {key:'serie_ctps', label:'Série da CTPS', manual:true},
-      {key:'desconto_alimentacao', label:'Desconto alimentação (R$)', manual:true},
-      {key:'horario_seg_qui', label:'Horário (seg. a qui.)', manual:true},
-      {key:'horario_sexta', label:'Horário (sexta)', manual:true},
-      {key:'representante_legal', label:'Representante legal (assina pelo empregador)', manual:true, full:true}
+      {key:'email', label:'E-mail', full:true},
+      {key:'ddd_telefone', label:'DDD telefone'},
+      {key:'telefone', label:'Telefone'},
+      {key:'ddd_contato_2', label:'DDD contato 2'},
+      {key:'contato_2', label:'Contato 2'}
     ]
   },
   {
-    title: 'Vínculo e lotação (preencher manualmente)',
+    title: 'Dados bancários',
     fields: [
-      {key:'codigo_empregado', label:'Código empregado', manual:true},
-      {key:'codigo_filial', label:'Código filial', manual:true},
-      {key:'codigo_servico', label:'Código serviço', manual:true},
-      {key:'codigo_cargo', label:'Código cargo', manual:true},
-      {key:'codigo_departamento', label:'Código departamento', manual:true},
-      {key:'codigo_centro_custos', label:'Centro de custos', manual:true},
-      {key:'codigo_convenio_coletivo', label:'Convenção coletiva', manual:true},
-      {key:'codigo_sindicato_cadastro', label:'Sindicato (cadastro)', manual:true}
+      {key:'codigo_banco', label:'Código do banco (cadastro do Domínio)', full:true},
+      {key:'conta_corrente', label:'Conta corrente'},
+      {key:'digito_conta', label:'Dígito da conta'},
+      {key:'tipo_conta', label:'Tipo de conta', full:true}
     ]
   },
   {
-    title: 'Contrato e admissão (preencher manualmente)',
+    title: 'Dados para o contrato',
     fields: [
-      {key:'salario', label:'Salário', manual:true},
-      {key:'data_admissao', label:'Data de admissão', manual:true},
-      {key:'codigo_esocial_empregado', label:'Código eSocial', manual:true},
-      {key:'vinculo_empregaticio', label:'Vínculo empregatício', manual:true, full:true, options:[
-        ['0','Não aparece no SEFIP'],['1','Celetista'],['2','Estatutário'],['3','Trabalhador Avulso'],
-        ['4','Trabalhador Temporário Lei 6.019/74'],['5','Celetista Contrato Prazo Determinado'],
-        ['6','Trabalhador Rural'],['7','Diretor s/ Vínculo c/ FGTS'],['8','Servidor Público não Efetivo'],
-        ['9','Trab. Rural Contrato Prazo Determinado'],['10','Contrato Prazo Determinado Lei 9.601/98'],
-        ['11','Diretor sem vínculo, SEM FGTS'],['13','Autônomo'],['14','Aut. Classe 14'],['15','Transp. 15'],
-        ['16','Transp. Classe 16'],['17','Cooperado'],['18','Transportador cooperado'],
-        ['22','Contrib. indiv. contratado por contrib. indiv'],
-        ['23','Contrib. indiv. transportador aut. contratado por contrib. indiv.'],
-        ['24','Cooperado que presta serv. para entidade beneficente'],
-        ['25','Transp. cooperado que presta serv. para entidade beneficente'],
-        ['50','Estagiário'],['51','Contrato Experiência'],['52','Empregado Doméstico'],
-        ['53','Menor Aprendiz'],['54','Empregado Doméstico Regime Tempo Parcial'],
-        ['99','Celetista regime tempo parcial']
-      ]},
-      {key:'categoria', label:'Categoria', manual:true, options:[
-        ['1','Mensalista'],['3','Semanalista'],['4','Diarista'],['5','Horista'],
-        ['6','Tarefeiro'],['7','Comissionado'],['8','Diretor']
-      ]},
-      {key:'tipo_indicativo_admissao', label:'Tipo indicativo admissão', manual:true, options:[
-        ['1','1º emprego'],['2','Normal'],['3','Decorrente de ação fiscal'],['4','Decorrente de decisão judicial']
-      ]},
-      {key:'tipo_admissao', label:'Tipo de admissão', manual:true, options:[
-        ['1','Admissão'],['2','Admissão por sucessão/incorporação/fusão'],
-        ['3','Transferência com ônus'],['4','Transferência sem ônus'],['5','Reintegração']
-      ]},
-      {key:'codigo_categoria_esocial', label:'Código categoria eSocial', manual:true},
-      {key:'atividade_simples_nacional', label:'Atividade simples nacional', manual:true, full:true, options:[
-        ['1','Não optante'],['2','Optante enquadrada nos anexos I a III e V'],
-        ['3','Optante enquadrada no anexo IV'],['4','Optante com atividades concomitantes']
-      ]}
+      {key:'funcao', label:'Função'},
+      {key:'numero_ctps', label:'Número da CTPS'},
+      {key:'serie_ctps', label:'Série da CTPS'},
+      {key:'desconto_alimentacao', label:'Desconto alimentação (R$)'},
+      {key:'horario_seg_qui', label:'Horário (seg. a qui.)'},
+      {key:'horario_sexta', label:'Horário (sexta)'},
+      {key:'representante_legal', label:'Representante legal (assina pelo empregador)', full:true}
     ]
   },
   {
-    title: 'Jornada de trabalho (preencher manualmente)',
+    title: 'Vínculo e lotação — códigos do Domínio da empresa',
     fields: [
-      {key:'horas_dia', label:'Horas por dia', manual:true},
-      {key:'horas_semana', label:'Horas por semana', manual:true},
-      {key:'horas_mes', label:'Horas por mês', manual:true},
-      {key:'codigo_jornada', label:'Código da jornada', manual:true},
-      {key:'forma_calculo_pagamento', label:'Forma de cálculo', manual:true, options:[['1','Por mês'],['2','Por semana']]},
-      {key:'forma_pagamento', label:'Forma de pagamento', manual:true, options:[['C','Crédito CC'],['D','Dinheiro'],['H','Cheque']]},
-      {key:'vencimento_ferias', label:'Vencimento das férias', manual:true}
+      {key:'codigo_empregado', label:'Código empregado'},
+      {key:'codigo_filial', label:'Código filial'},
+      {key:'codigo_servico', label:'Código serviço'},
+      {key:'codigo_cargo', label:'Código cargo'},
+      {key:'codigo_departamento', label:'Código departamento'},
+      {key:'codigo_centro_custos', label:'Centro de custos'},
+      {key:'codigo_convenio_coletivo', label:'Convenção coletiva'},
+      {key:'codigo_sindicato_cadastro', label:'Sindicato (cadastro)'},
+      {key:'codigo_jornada', label:'Código da jornada'}
     ]
   },
   {
-    title: 'FGTS e sindicato (preencher manualmente)',
+    title: 'Contrato e admissão',
     fields: [
-      {key:'optante_fgts', label:'Optante do FGTS', manual:true, options:[['N','Não'],['S','Sim']]},
-      {key:'data_opcao_fgts', label:'Data opção FGTS', manual:true},
-      {key:'ocorrencia_sefip', label:'Ocorrência SEFIP', manual:true, full:true, options:[
-        ['0','Nunca teve agente nocivo'],['1','01 - Não exposto a agente nocivo'],
-        ['2','02 - Exp. agente nocivo (Apo. Esp. 15 anos)'],['3','03 - Exp. agente nocivo (Apo. Esp. 20 anos)'],
-        ['4','04 - Exp. agente nocivo (Apo. Esp. 25 anos)'],['5','05 - Não exposto a agente nocivo'],
-        ['6','06 - Exp. agente nocivo (Apo. Esp. 15 anos)'],['7','07 - Exp. agente nocivo (Apo. Esp. 20 anos)'],
-        ['8','08 - Exp. agente nocivo (Apo. Esp. 25 anos)']
-      ]},
-      {key:'multiplos_vinculos', label:'Múltiplos vínculos', manual:true, options:[
-        ['B','Sim, abaixo do teto'],['D','Sim, neste banco'],['N','Não'],['T','Sim, acima do teto']
-      ]},
-      {key:'pagou_contribuicao_sindical', label:'Pagou contr. sindical', manual:true, options:[
-        ['L','Prof. Liberal'],['N','Não'],['S','Sim'],['X','Não pagar']
-      ]}
+      {key:'salario', label:'Salário (ex.: 2500,00)'},
+      {key:'data_admissao', label:'Data de admissão'},
+      {key:'vinculo_empregaticio', label:'Vínculo empregatício', full:true},
+      {key:'codigo_categoria_esocial', label:'Código categoria eSocial'},
+      {key:'codigo_esocial_empregado', label:'Código eSocial do empregado'},
+      {key:'categoria', label:'Categoria'},
+      {key:'tipo_indicativo_admissao', label:'Tipo indicativo admissão'},
+      {key:'tipo_admissao', label:'Tipo de admissão', full:true},
+      {key:'atividade_simples_nacional', label:'Atividade Simples Nacional', full:true}
     ]
   },
   {
-    title: 'Dados bancários (preencher manualmente)',
+    title: 'Jornada de trabalho',
     fields: [
-      {key:'codigo_banco', label:'Código do banco', manual:true},
-      {key:'conta_corrente', label:'Conta corrente', manual:true},
-      {key:'digito_conta', label:'Dígito da conta', manual:true},
-      {key:'tipo_conta', label:'Tipo de conta', manual:true, options:[
-        ['1','Não informada'],['2','Conta corrente'],['3','Conta salário'],['4','Conta poupança']
-      ]}
+      {key:'horas_semana', label:'Horas por semana (ex.: 44)'},
+      {key:'horas_dia', label:'Horas por dia'},
+      {key:'horas_mes', label:'Horas por mês'},
+      {key:'vencimento_ferias', label:'Vencimento das férias'},
+      {key:'forma_calculo_pagamento', label:'Forma de cálculo'},
+      {key:'forma_pagamento', label:'Forma de pagamento'}
     ]
   },
   {
-    title: 'Contrato de experiência, se houver (preencher manualmente)',
+    title: 'FGTS, SEFIP e sindicato',
     fields: [
-      {key:'contrato_experiencia', label:'Contrato de experiência?', manual:true, options:[['0','Não possui'],['1','Possui']]},
-      {key:'clausula_assecuratoria', label:'Cláusula assecuratória', manual:true, full:true, options:[
-        ['1','Regido pelo art. 479/480 CLT ou sem cláusula'],['2','Regido pelo art. 481 CLT']
-      ]},
-      {key:'dias_contrato_experiencia', label:'Dias do contrato de experiência', manual:true},
-      {key:'inicio_prazo_determinado', label:'Início do prazo determinado', manual:true},
-      {key:'fim_prazo_determinado', label:'Fim do prazo determinado', manual:true},
-      {key:'dias_prorrogacao', label:'Dias de prorrogação', manual:true},
-      {key:'prorrogacao_prazo_determinado', label:'Data de prorrogação', manual:true},
-      {key:'motivo_prorrogacao', label:'Motivo da prorrogação', manual:true, full:true}
+      {key:'optante_fgts', label:'Optante do FGTS'},
+      {key:'data_opcao_fgts', label:'Data opção FGTS'},
+      {key:'ocorrencia_sefip', label:'Ocorrência SEFIP', full:true},
+      {key:'multiplos_vinculos', label:'Múltiplos vínculos'},
+      {key:'pagou_contribuicao_sindical', label:'Pagou contr. sindical'}
     ]
   },
   {
-    title: 'Dados complementares (preencher manualmente)',
+    title: 'Contrato de experiência, se houver',
     fields: [
-      {key:'grau_instrucao', label:'Grau de instrução', manual:true, full:true, options:[
-        ['1','Analfabeto'],['2','Primário incompleto'],['3','Primário completo'],['4','Ginásio incompleto'],
-        ['5','Ginásio completo'],['6','2º grau incompleto'],['7','2º grau completo'],['8','Superior incompleto'],
-        ['9','Superior completo'],['10','Mestrado'],['11','Doutorado'],['12','PhD'],['13','Pós-graduação']
-      ]},
-      {key:'deficiente_fisico', label:'Deficiente físico', manual:true, options:[['0','Não'],['1','Sim']]},
-      {key:'situacao_qualificacao_cadastral', label:'Qualificação cadastral INSS/RF', manual:true, options:[['0','Não qualificado'],['1','Qualificado']]},
-      {key:'raca_cor', label:'Raça/Cor', manual:true, options:[
-        ['0','Indígena'],['2','Branca'],['4','Preta'],['6','Amarela'],['8','Parda'],['9','Não informada']
-      ]},
-      {key:'estado_civil', label:'Estado civil', manual:true, options:[
-        ['S','Solteiro'],['C','Casado'],['V','Viúvo'],['D','Divorciado'],['O','Concubinato'],
-        ['J','Separado judicialmente'],['U','União estável']
-      ]},
-      {key:'recebia_seguro_desemprego', label:'Recebia seguro desemprego', manual:true, options:[['0','Não'],['1','Sim']]},
-      {key:'tipo_endereco', label:'Tipo de endereço', manual:true, full:true, options:[
-        ['1','Aeroporto'],['2','Alameda'],['3','Área'],['4','Avenida'],['5','Campo'],['6','Chácara'],
-        ['7','Colônia'],['8','Condomínio'],['9','Conjunto'],['10','Distrito'],['11','Esplanada'],
-        ['12','Estação'],['13','Estrada'],['14','Favela'],['15','Fazenda'],['16','Feira'],['17','Jardim'],
-        ['18','Ladeira'],['19','Lago'],['20','Lagoa'],['21','Largo'],['22','Loteamento'],['23','Morro'],
-        ['24','Núcleo'],['25','Parque'],['26','Passarela'],['27','Pátio'],['28','Praça'],['29','Quadra'],
-        ['30','Recanto'],['31','Residencial'],['32','Rodovia'],['33','Rua'],['34','Setor'],['35','Sítio'],
-        ['36','Travessa'],['37','Trecho'],['38','Trevo'],['40','Vereda'],['41','Via'],['42','Viaduto'],
-        ['43','Viela'],['44','Vila'],['49','Vale'],['99','Outro']
-      ]}
+      {key:'contrato_experiencia', label:'Contrato de experiência?'},
+      {key:'dias_contrato_experiencia', label:'Dias do contrato de experiência'},
+      {key:'clausula_assecuratoria', label:'Cláusula assecuratória', full:true},
+      {key:'inicio_prazo_determinado', label:'Início do prazo determinado'},
+      {key:'fim_prazo_determinado', label:'Fim do prazo determinado'},
+      {key:'dias_prorrogacao', label:'Dias de prorrogação'},
+      {key:'prorrogacao_prazo_determinado', label:'Data de prorrogação'},
+      {key:'motivo_prorrogacao', label:'Motivo da prorrogação', full:true}
     ]
   },
   {
-    title: 'Contato (preencher manualmente)',
+    title: 'Dados complementares',
     fields: [
-      {key:'email', label:'E-mail', manual:true, full:true},
-      {key:'ddd_telefone', label:'DDD telefone', manual:true},
-      {key:'telefone', label:'Telefone', manual:true},
-      {key:'ddd_contato_2', label:'DDD contato 2', manual:true},
-      {key:'contato_2', label:'Contato 2', manual:true}
+      {key:'raca_cor', label:'Raça/Cor (autodeclarada)'},
+      {key:'deficiente_fisico', label:'Deficiente físico'},
+      {key:'recebia_seguro_desemprego', label:'Recebia seguro desemprego'},
+      {key:'situacao_qualificacao_cadastral', label:'Qualificação cadastral INSS/RF'}
+    ]
+  },
+  {
+    title: 'Códigos de tabela do Domínio (calculados — confira)',
+    fields: [
+      {key:'tipo_endereco', label:'Tipo de endereço', full:true},
+      {key:'codigo_municipio_endereco', label:'Município do endereço (código)'},
+      {key:'codigo_municipio_nascimento', label:'Município de nascimento (código)'},
+      {key:'pais_nacionalidade', label:'País da nacionalidade', full:true},
+      {key:'pais_nascimento', label:'País de nascimento', full:true},
+      {key:'pais_endereco', label:'País do endereço', full:true}
     ]
   }
 ];
@@ -621,7 +589,18 @@ extractBtn.addEventListener('click', async () => {
   }
 });
 
-function renderResults(parsed){
+// ---------- Formulário + conferência ao vivo contra a planilha do Domínio ----------
+let META = {};
+const metaPronta = fetch('api/campos').then(r => r.json()).then(m => { META = m; }).catch(() => {});
+let bancoIdentificado = '';
+
+function escapeHtml(texto){
+  return String(texto ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function renderResults(resposta){
+  await metaPronta;
+  bancoIdentificado = resposta.banco_identificado || '';
   emptyState.style.display = 'none';
   resultsArea.style.display = 'flex';
   fieldsGrid.innerHTML = '';
@@ -631,114 +610,112 @@ function renderResults(parsed){
   generateBtn.innerHTML = 'Aprovar e Gerar Contratos';
   copyBtn.style.display = '';
 
+  const dados = resposta.dados || {};
   FIELD_GROUPS.forEach(group => {
     const groupEl = document.createElement('div');
     groupEl.className = 'field-group';
-
     const titleEl = document.createElement('p');
     titleEl.className = 'field-group-title';
     titleEl.textContent = group.title;
     groupEl.appendChild(titleEl);
-
     const gridEl = document.createElement('div');
     gridEl.className = 'fields-grid';
 
     group.fields.forEach(def => {
-      const valor = parsed[def.key] || '';
-      const isMissing = !def.manual && !valor;
+      const meta = META[def.key] || {};
+      const valor = dados[def.key] || '';
       const field = document.createElement('div');
-      field.className = 'field' + (def.full ? ' full' : '') + (isMissing ? ' warn' : '');
+      field.className = 'field' + (def.full ? ' full' : '');
+      field.id = `wrap-${def.key}`;
 
       let controle;
-      if (def.options) {
-        const opcoes = ['<option value="">—</option>'].concat(
-          def.options.map(([v, l]) => `<option value="${v}"${v === valor ? ' selected' : ''}>${v} — ${l}</option>`)
-        ).join('');
+      if (meta.opcoes) {
+        const conhecido = meta.opcoes.some(([v]) => v === valor);
+        const opcoes = ['<option value="">—</option>']
+          .concat(!conhecido && valor ? [`<option value="${escapeHtml(valor)}" selected>${escapeHtml(valor)} (não está na tabela)</option>`] : [])
+          .concat(meta.opcoes.map(([v, l]) => `<option value="${escapeHtml(v)}"${v === valor ? ' selected' : ''}>${escapeHtml(v === l ? v : `${v} — ${l}`)}</option>`))
+          .join('');
         controle = `<select id="field-${def.key}">${opcoes}</select>`;
       } else {
-        controle = `<input id="field-${def.key}" value="${valor.replace(/"/g,'&quot;')}" placeholder="${isMissing ? 'Preencha manualmente' : (def.manual ? 'Opcional' : '')}">`;
+        controle = `<input id="field-${def.key}" value="${escapeHtml(valor)}">`;
       }
-
+      const posicao = meta.posicao ? `<span class="pos" title="Posição ${meta.posicao} do layout do Domínio">#${meta.posicao}</span>` : '';
       field.innerHTML = `
-        <label>${def.label}</label>
+        <label>${escapeHtml(def.label)}${meta.obrigatorio ? ' <span class="req" title="Obrigatório no Domínio">*</span>' : ''} ${posicao}</label>
         <div class="field-input-wrap">${controle}</div>
-        ${def.hint ? `<p class="field-hint" id="hint-${def.key}"></p>` : ''}
+        <p class="field-msg" id="msg-${def.key}"></p>
       `;
       gridEl.appendChild(field);
+      const input = field.querySelector('input,select');
+      if ((resposta.calculados || []).includes(def.key)) input.dataset.auto = '1';
+      input.addEventListener(input.tagName === 'SELECT' ? 'change' : 'input', () => {
+        delete input.dataset.auto; // o RH mexeu: daqui pra frente o cálculo não sobrescreve
+        agendarValidacao();
+      });
     });
-
     groupEl.appendChild(gridEl);
     fieldsGrid.appendChild(groupEl);
   });
-
-  ativarCalculoVencimentoFerias();
-  ativarDicasDeCampo();
+  aplicarConferencia(resposta);
 }
 
-// Traduz, em tempo real, o que a IA escreveu para o valor que de fato vai pro
-// arquivo do Domínio — assim o RH bate o olho e entende o que está sendo
-// feito, sem precisar abrir o arquivo de conferência depois.
-function mapearSexoDominio(sexo){
-  const s = (sexo || '').trim().toLowerCase();
-  if (s.startsWith('m')) return 'M';
-  if (s.startsWith('f')) return 'F';
-  return '';
+let timerValidacao;
+function agendarValidacao(){
+  clearTimeout(timerValidacao);
+  timerValidacao = setTimeout(validarAgora, 450);
 }
 
-function ativarDicasDeCampo(){
-  const campoSexo = document.getElementById('field-sexo');
-  const hintSexo = document.getElementById('hint-sexo');
-  if (campoSexo && hintSexo) {
-    const atualizar = () => {
-      const codigo = mapearSexoDominio(campoSexo.value);
-      hintSexo.textContent = codigo ? `→ Domínio: ${codigo}` : '';
-    };
-    campoSexo.addEventListener('input', atualizar);
-    atualizar();
-  }
-
-  const campoRg = document.getElementById('field-rg');
-  const campoCpf = document.getElementById('field-cpf');
-  const hintRg = document.getElementById('hint-rg');
-  if (campoRg && campoCpf && hintRg) {
-    const atualizar = () => {
-      if (campoRg.value.trim()) {
-        hintRg.textContent = '';
-      } else if (campoCpf.value.trim()) {
-        hintRg.textContent = `→ RG vazio: o Domínio vai usar o CPF (${campoCpf.value.trim()}) como Identidade`;
-      } else {
-        hintRg.textContent = '→ RG vazio: preencha o CPF para usá-lo como Identidade no Domínio';
-      }
-    };
-    campoRg.addEventListener('input', atualizar);
-    campoCpf.addEventListener('input', atualizar);
-    atualizar();
-  }
+async function validarAgora(){
+  try {
+    const resp = await fetch('api/validar', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(coletarDadosValidados())});
+    if (resp.ok) aplicarConferencia(await resp.json());
+  } catch { /* sem rede: a conferência final acontece no Gerar */ }
 }
 
-// Vencimento das férias = data de admissão + 1 ano - 1 dia (regra do próprio
-// dicionário de campos do Domínio). Só preenche sozinho enquanto o RH não
-// tiver digitado algo manualmente naquele campo.
-function ativarCalculoVencimentoFerias(){
-  const campoAdmissao = document.getElementById('field-data_admissao');
-  const campoFerias = document.getElementById('field-vencimento_ferias');
-  if (!campoAdmissao || !campoFerias) return;
-
-  campoAdmissao.addEventListener('input', () => {
-    if (campoFerias.dataset.editadoManualmente === 'true') return;
-    const m = campoAdmissao.value.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-    if (!m) return;
-    const data = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
-    data.setFullYear(data.getFullYear() + 1);
-    data.setDate(data.getDate() - 1);
-    const dd = String(data.getDate()).padStart(2, '0');
-    const mm = String(data.getMonth() + 1).padStart(2, '0');
-    campoFerias.value = `${dd}/${mm}/${data.getFullYear()}`;
+// Preenche os calculados (só onde está vazio ou ainda é cálculo do sistema) e mostra erro/aviso/dica por campo.
+function aplicarConferencia(resultado){
+  const dados = resultado.dados || {};
+  const calculados = resultado.calculados || [];
+  calculados.forEach(chave => {
+    const input = document.getElementById(`field-${chave}`);
+    if (!input || (input.value && input.dataset.auto !== '1')) return;
+    if (input.tagName === 'SELECT' && ![...input.options].some(o => o.value === dados[chave])) return;
+    input.value = dados[chave];
+    input.dataset.auto = '1';
+  });
+  // Calculados que deixaram de valer (ex.: apagou a data de admissão) somem junto.
+  document.querySelectorAll('[data-auto="1"]').forEach(input => {
+    const chave = input.id.replace('field-', '');
+    if (!calculados.includes(chave)) { input.value = ''; delete input.dataset.auto; }
   });
 
-  campoFerias.addEventListener('input', () => {
-    campoFerias.dataset.editadoManualmente = 'true';
+  let faltando = 0, comErro = 0;
+  FIELD_DEFS.forEach(def => {
+    const wrap = document.getElementById(`wrap-${def.key}`);
+    const msg = document.getElementById(`msg-${def.key}`);
+    const input = document.getElementById(`field-${def.key}`);
+    if (!wrap || !msg) return;
+    const erro = (resultado.erros || {})[def.key];
+    const aviso = (resultado.avisos || {})[def.key];
+    let dica = (resultado.dicas || {})[def.key] || '';
+    if (def.key === 'codigo_banco' && bancoIdentificado) dica = `Documento mostra: ${bancoIdentificado} — use o código desse banco no cadastro do Domínio`;
+    const falta = Boolean(erro) && /^Obrigatório no Domínio/.test(erro);
+    const auto = input?.dataset.auto === '1';
+    if (falta) faltando++; else if (erro) comErro++;
+    wrap.classList.toggle('err', Boolean(erro) && !falta);
+    wrap.classList.toggle('missing', falta);
+    wrap.classList.toggle('warn', !erro && Boolean(aviso));
+    wrap.classList.toggle('auto', auto);
+    msg.textContent = erro && !falta ? erro : (aviso || (auto ? `calculado pelo sistema${dica ? ' · ' + dica : ''}` : dica));
   });
+  const resumo = document.getElementById('resumoConferencia');
+  if (faltando || comErro) {
+    resumo.className = 'resumo pendente';
+    resumo.textContent = [comErro ? `${comErro} campo(s) com erro` : '', faltando ? `${faltando} obrigatório(s) do Domínio em branco` : ''].filter(Boolean).join(' · ');
+  } else {
+    resumo.className = 'resumo ok';
+    resumo.textContent = '✓ Tudo conferido com a planilha do Domínio — pronto para gerar.';
+  }
 }
 
 function coletarDadosValidados(){
@@ -767,6 +744,12 @@ generateBtn.addEventListener('click', async () => {
       body: JSON.stringify(dados)
     });
     const data = await resp.json();
+    if (resp.status === 422 && data.erros) {
+      aplicarConferencia(data);
+      const primeiro = document.querySelector('.field.err, .field.missing');
+      if (primeiro) primeiro.scrollIntoView({behavior:'smooth', block:'center'});
+      throw new Error(data.detail);
+    }
     if (!resp.ok) {
       throw new Error(data.detail || 'Falha ao gerar arquivos.');
     }
