@@ -667,7 +667,7 @@ function agendarValidacao(){
 
 async function validarAgora(){
   try {
-    const resp = await fetch('api/validar', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(coletarDadosValidados())});
+    const resp = await fetch('api/validar', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(coletarDadosValidados({semCalculados: true}))});
     if (resp.ok) aplicarConferencia(await resp.json());
   } catch { /* sem rede: a conferência final acontece no Gerar */ }
 }
@@ -718,17 +718,19 @@ function aplicarConferencia(resultado){
   }
 }
 
-function coletarDadosValidados(){
+// Para conferir/gerar, os campos que ainda são cálculo do sistema vão vazios: o servidor recalcula
+// (e devolve em "calculados") — senão viravam "digitados" e não acompanhavam mais a data de admissão etc.
+function coletarDadosValidados({semCalculados = false} = {}){
   const dados = {};
   FIELD_DEFS.forEach(def => {
     const input = document.getElementById(`field-${def.key}`);
-    dados[def.key] = input ? input.value.trim() : '';
+    dados[def.key] = input && !(semCalculados && input.dataset.auto === '1') ? input.value.trim() : '';
   });
   return dados;
 }
 
 generateBtn.addEventListener('click', async () => {
-  const dados = coletarDadosValidados();
+  const dados = coletarDadosValidados({semCalculados: true});
   if (!dados.nome_completo) {
     alert('Preencha ao menos o nome completo antes de gerar os arquivos.');
     return;
