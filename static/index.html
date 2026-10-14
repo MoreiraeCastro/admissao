@@ -242,7 +242,7 @@
   <div class="board">
     <div class="panel">
       <p class="panel-title">Documentos do Colaborador</p>
-      <p class="panel-desc">Faça upload do RG, CPF ou CNH e, se quiser preencher o endereço, adicione também um comprovante de residência (conta de luz, água etc). A IA fará a leitura e extração.</p>
+      <p class="panel-desc">Envie todos os documentos que tiver do colaborador — RG, CPF, CNH, comprovante de residência e o que mais houver. Não há limite de quantidade: quanto mais documentos, mais campos a IA consegue preencher.</p>
 
       <div class="dropzone" id="dropzone">
         <div class="dropzone-plus">+</div>
@@ -527,12 +527,41 @@ dropzone.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
 fileInput.addEventListener('change', e => handleFiles(e.target.files));
 
 function handleFiles(fileListRaw){
-  const files = Array.from(fileListRaw).slice(0, 3);
-  files.forEach(file => {
-    const id = crypto.randomUUID();
-    state.files.push({id, file, status:'pronto'});
-    renderDocList();
+  Array.from(fileListRaw).forEach(file => {
+    state.files.push({id: crypto.randomUUID(), file, status: formatarTamanho(file.size)});
   });
+  fileInput.value = ''; // permite escolher de novo o mesmo arquivo depois de removê-lo
+  renderDocList();
+}
+
+function formatarTamanho(bytes){
+  return bytes >= 1024 * 1024 ? (bytes / 1024 / 1024).toFixed(1) + ' MB' : Math.max(1, Math.round(bytes / 1024)) + ' KB';
+}
+
+// Fotos de celular chegam com 3–8 MB cada; a IA reduz toda imagem para ~1.600 px de
+// qualquer jeito, então diminuir aqui (2.000 px, JPEG) não perde leitura e deixa caber
+// muitos documentos no mesmo envio (limite de ~20 MB por envio no servidor).
+const LADO_MAXIMO_IMAGEM = 2000;
+const LIMITE_ENVIO_BYTES = 19 * 1024 * 1024;
+
+async function prepararArquivo(file){
+  if (!file.type.startsWith('image/') || file.type === 'image/gif') return file;
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    // Formato que o navegador não abre (ex.: HEIC do iPhone) — o servidor avisa se a IA também não aceitar.
+    return file;
+  }
+  const escala = Math.min(1, LADO_MAXIMO_IMAGEM / Math.max(bitmap.width, bitmap.height));
+  if (escala === 1 && file.size < 1.5 * 1024 * 1024) return file;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * escala);
+  canvas.height = Math.round(bitmap.height * escala);
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+  if (!blob || blob.size >= file.size) return file;
+  return new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', {type: 'image/jpeg'});
 }
 
 function renderDocList(){
@@ -543,14 +572,16 @@ function renderDocList(){
     row.innerHTML = `
       <div class="doc-thumb" style="display:flex; align-items:center; justify-content:center; font-size:10px; color:var(--ink-muted);">IMG</div>
       <div class="doc-meta">
-        <div class="doc-name">${entry.file.name}</div>
+        <div class="doc-name"></div>
         <div class="doc-status">${entry.status}</div>
       </div>
       <button class="doc-remove" onclick="removeFile('${entry.id}')">×</button>
     `;
+    row.querySelector('.doc-name').textContent = entry.file.name;
     docList.appendChild(row);
   });
   extractBtn.disabled = state.files.length === 0;
+  extractBtn.textContent = state.files.length > 1 ? `Extrair dados via IA (${state.files.length} documentos)` : 'Extrair dados via IA';
 }
 
 window.removeFile = function(id) {
@@ -563,10 +594,18 @@ extractBtn.addEventListener('click', async () => {
   statusLine.classList.remove('err');
   statusLine.innerHTML = '<span class="spinner" style="display:inline-block;vertical-align:-2px;margin-right:6px;"></span> IA lendo documentos...';
 
-  const formData = new FormData();
-  state.files.forEach(entry => formData.append('documentos', entry.file, entry.file.name));
-
   try {
+    const formData = new FormData();
+    let total = 0;
+    for (const entry of state.files) {
+      const arquivo = await prepararArquivo(entry.file);
+      total += arquivo.size;
+      formData.append('documentos', arquivo, arquivo.name);
+    }
+    if (total > LIMITE_ENVIO_BYTES) {
+      throw new Error(`Os documentos somam ${formatarTamanho(total)} mesmo depois de reduzidos — o limite por envio é de ~19 MB. Tire os PDFs muito grandes ou divida em dois envios.`);
+    }
+
     const resp = await fetch('api/extrair', { method: 'POST', body: formData });
     const data = await resp.json();
     if (!resp.ok) {

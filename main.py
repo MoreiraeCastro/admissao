@@ -65,7 +65,7 @@ async def _limpeza_diaria_loop() -> None:
         _limpar_todos_os_jobs()
 
 
-ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5-5")
 
 app = FastAPI(title="Admissão RH — API")
 
@@ -87,7 +87,7 @@ async def _iniciar_limpeza_diaria() -> None:
 
 SYSTEM_PROMPT = """Você é um assistente especialista em extrair dados cadastrais de documentos brasileiros a partir de imagens ou PDFs, para fins de admissão de funcionários.
 
-Você pode receber mais de um documento na mesma solicitação — por exemplo, um documento de identificação (RG, CPF ou CNH) e, separadamente, um comprovante de residência (conta de luz, água, telefone ou internet). Combine as informações de TODOS os documentos enviados num único resultado: dados pessoais normalmente vêm do documento de identificação, e o endereço normalmente vem do comprovante de residência (mas também pode vir do próprio documento de identificação, quando presente).
+Você pode receber vários documentos na mesma solicitação, sem limite de quantidade — por exemplo RG, CPF, CNH, CIN, comprovante de residência (conta de luz, água, telefone ou internet), certidões e outros. Combine as informações de TODOS os documentos enviados num único resultado: dados pessoais normalmente vêm do documento de identificação, e o endereço normalmente vem do comprovante de residência (mas também pode vir do próprio documento de identificação, quando presente). Se dois documentos trouxerem valores diferentes para o mesmo campo, prefira o documento oficial de identificação para dados pessoais e o comprovante mais recente para o endereço.
 
 Analise cuidadosamente os documentos fornecidos e devolva a resposta APENAS como um objeto JSON válido — sem markdown, sem texto antes ou depois, sem comentários — contendo exatamente estas chaves:
 
@@ -126,13 +126,18 @@ Regras:
 IMAGE_MEDIA_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}
 
 
+# A API da Anthropic aceita até 32 MB por requisição (o base64 aumenta ~33%) e o
+# nginx corta envios acima de 20 MB — o frontend já reduz as fotos antes de mandar.
+LIMITE_TOTAL_BYTES = 19 * 1024 * 1024
+
+
 def _build_content_block(content_type: str, data_b64: str) -> dict:
     if content_type == "application/pdf":
         return {
             "type": "document",
             "source": {"type": "base64", "media_type": "application/pdf", "data": data_b64},
         }
-    media_type = content_type if content_type in IMAGE_MEDIA_TYPES else "image/jpeg"
+    media_type = "image/jpeg" if content_type == "image/jpg" else content_type
     return {
         "type": "image",
         "source": {"type": "base64", "media_type": media_type, "data": data_b64},
@@ -170,20 +175,45 @@ async def extrair_dados(documentos: List[UploadFile] = File(...)):
     import anthropic
 
     content_blocks = []
+    nao_suportados = []
+    total_bytes = 0
     for upload in documentos:
         raw = await upload.read()
         if not raw:
             continue
+        content_type = (upload.content_type or "").lower()
+        if content_type != "application/pdf" and content_type not in IMAGE_MEDIA_TYPES:
+            # Antes caía como "image/jpeg" e a IA recusava o pedido inteiro (ex.: HEIC do iPhone).
+            nao_suportados.append(upload.filename or content_type or "arquivo")
+            continue
+        total_bytes += len(raw)
         b64 = base64.b64encode(raw).decode("utf-8")
-        content_blocks.append(_build_content_block(upload.content_type or "", b64))
+        content_blocks.append({"type": "text", "text": f"Documento: {upload.filename or 'sem nome'}"})
+        content_blocks.append(_build_content_block(content_type, b64))
 
+    if nao_suportados:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Formato não suportado pela IA: " + ", ".join(nao_suportados)
+                + ". Envie como JPG, PNG, WEBP ou PDF (no iPhone, tire print da foto ou exporte como JPG)."
+            ),
+        )
     if not content_blocks:
         raise HTTPException(status_code=400, detail="Os arquivos enviados estão vazios.")
+    if total_bytes > LIMITE_TOTAL_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Os documentos somam {total_bytes / 1024 / 1024:.1f} MB — o limite por envio é de ~19 MB. Divida em dois envios.",
+        )
 
     content_blocks.append(
         {
             "type": "text",
-            "text": "Extraia os dados cadastrais dos documentos de identificação acima.",
+            "text": (
+                f"Extraia os dados cadastrais dos {sum(1 for b in content_blocks if b['type'] != 'text')} "
+                "documento(s) acima, combinando as informações de todos eles."
+            ),
         }
     )
 

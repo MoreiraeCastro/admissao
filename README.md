@@ -8,8 +8,9 @@ Em produção em `https://portalmoreiraecastro.com.br/admissao/`.
 
 ## Como funciona
 
-1. O RH arrasta os documentos do colaborador (RG, CPF ou CNH e, opcionalmente, um
-   comprovante de residência) no frontend (`static/index.html`).
+1. O RH arrasta todos os documentos do colaborador no frontend (`static/index.html`), sem
+   limite de quantidade: RG, CPF, CNH, comprovante de residência etc. As fotos são reduzidas
+   no navegador antes do envio; o limite é de ~19 MB por envio.
 2. `POST /api/extrair` envia os documentos para a API da Anthropic (Claude), que lê e
    devolve os dados pessoais e de endereço em JSON.
 3. O RH revisa os dados extraídos e preenche manualmente os campos de folha de
@@ -31,7 +32,7 @@ Em produção em `https://portalmoreiraecastro.com.br/admissao/`.
 - Backend: FastAPI (Python 3.12.4), sem banco de dados
 - Frontend: HTML/JS puro (`static/index.html`), sem framework/build step
 - IA: API da Anthropic (`anthropic` SDK), modelo configurável via `ANTHROPIC_MODEL`
-  (default `claude-sonnet-5`)
+  (default `claude-sonnet-5-5`)
 - Geração de `.docx`: `python-docx`
 
 ## Rodando localmente
@@ -55,7 +56,7 @@ Acesse `http://localhost:8000`.
 | Variável            | Obrigatória | Descrição                                                        |
 |---------------------|:-----------:|--------------------------------------------------------------------|
 | `ANTHROPIC_API_KEY` | Sim         | Chave da API da Anthropic, usada em `/api/extrair`                 |
-| `ANTHROPIC_MODEL`   | Não         | Modelo Claude a usar (default: `claude-sonnet-5`)                  |
+| `ANTHROPIC_MODEL`   | Não         | Modelo Claude a usar (default: `claude-sonnet-5-5`)                  |
 
 ## Deploy (produção — AWS EC2)
 
