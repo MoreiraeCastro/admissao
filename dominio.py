@@ -113,6 +113,11 @@ OPCOES: dict[str, list[tuple[str, str]]] = {
         ("43", "Viela"), ("44", "Vila"), ("49", "Vale"), ("99", "Outro"),
     ],
     "contrato_experiencia": [("0", "Não possui"), ("1", "Possui")],
+    # Não é coluna do layout — escolhe como o sistema calcula fim/prorrogação da experiência (o RH sempre pode digitar).
+    "contagem_experiencia": [
+        ("CLT", "Pela CLT, contando o 1º dia (30 dias a partir de 01/10 terminam em 30/10)"),
+        ("MES", "Mês cheio, como o exemplo do Domínio (30 dias a partir de 01/10 terminam em 01/11)"),
+    ],
     "clausula_assecuratoria": [
         ("1", "Regido pelo art. 479/480 CLT ou sem cláusula assecuratória"), ("2", "Regido pelo art. 481 CLT"),
     ],
@@ -305,6 +310,25 @@ def mais_um_ano_menos_um_dia(d: date) -> date:
     return um_ano - timedelta(days=1)
 
 
+def somar_meses(d: date, meses: int) -> date:
+    """Mesmo dia N meses depois (31/01 + 1 mês → 28 ou 29/02)."""
+    total = d.month - 1 + meses
+    ano, mes = d.year + total // 12, total % 12 + 1
+    ultimo_dia = (date(ano + (mes == 12), mes % 12 + 1, 1) - timedelta(days=1)).day
+    return date(ano, mes, min(d.day, ultimo_dia))
+
+
+def fim_do_prazo(inicio: date, dias: int, contagem: str) -> date:
+    """Fim de um período de experiência/prorrogação começando em `inicio`.
+
+    CLT (padrão): o 1º dia conta — 30 dias a partir de 01/10 terminam em 30/10.
+    MES: como o exemplo da planilha do Domínio — múltiplos de 30 dias viram meses cheios (01/10 + 30 → 01/11).
+    """
+    if contagem == "MES":
+        return somar_meses(inicio, dias // 30) if dias % 30 == 0 else inicio + timedelta(days=dias)
+    return inicio + timedelta(days=dias - 1)
+
+
 def cpf_valido(cpf: str) -> bool:
     d = somente_digitos(cpf)
     if len(d) != 11 or d == d[0] * 11:
@@ -426,12 +450,15 @@ def preparar(entrada: dict) -> Resultado:
             calcular("inicio_prazo_determinado", formatar_data(admissao))
         inicio = parse_data(dados.get("inicio_prazo_determinado", ""))
         dias = dados.get("dias_contrato_experiencia", "")
+        contagem = dados.get("contagem_experiencia") or "CLT"
         if inicio and dias.isdigit() and int(dias) > 0:
-            calcular("fim_prazo_determinado", formatar_data(inicio + timedelta(days=int(dias) - 1)))
+            calcular("fim_prazo_determinado", formatar_data(fim_do_prazo(inicio, int(dias), contagem)))
         fim = parse_data(dados.get("fim_prazo_determinado", ""))
         dias_prorrogacao = dados.get("dias_prorrogacao", "")
         if fim and dias_prorrogacao.isdigit() and int(dias_prorrogacao) > 0:
-            calcular("prorrogacao_prazo_determinado", formatar_data(fim + timedelta(days=int(dias_prorrogacao))))
+            # A prorrogação começa no dia seguinte ao fim (CLT) — no "mês cheio" ela soma a partir do próprio fim, como no exemplo.
+            base = fim if contagem == "MES" else fim + timedelta(days=1)
+            calcular("prorrogacao_prazo_determinado", formatar_data(fim_do_prazo(base, int(dias_prorrogacao), contagem)))
 
     # 3) Conferência contra a planilha (obrigatórios, códigos do dicionário, tabelas)
     for p in POSICOES:
@@ -527,8 +554,12 @@ def linha(dados: dict) -> list[str]:
 
 def metadados_campos() -> dict:
     """Para o frontend: rótulo/posição/obrigatoriedade/opções de cada campo, direto destas regras."""
-    return {
+    campos = {
         p.chave: {"posicao": p.pos, "rotulo": p.rotulo, "obrigatorio": p.obrigatorio, "opcoes": OPCOES.get(p.chave)}
         for p in POSICOES
         if p.chave
     }
+    # Campos com lista de opções que não são coluna do layout (ex.: como contar a experiência).
+    for chave, opcoes in OPCOES.items():
+        campos.setdefault(chave, {"posicao": None, "rotulo": chave, "obrigatorio": False, "opcoes": opcoes})
+    return campos

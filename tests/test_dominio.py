@@ -98,6 +98,18 @@ def test_experiencia_pela_clt_e_condicionais():
     assert r.erros["motivo_prorrogacao"] == "Obrigatório quando há prorrogação."
 
 
+def test_contagem_mes_cheio_bate_com_o_exemplo_da_planilha():
+    r = dominio.preparar({"data_admissao": "01/10/2024", "contrato_experiencia": "1", "contagem_experiencia": "MES",
+                          "dias_contrato_experiencia": "30", "dias_prorrogacao": "30"})
+    assert r.dados["fim_prazo_determinado"] == "01/11/2024"
+    assert r.dados["prorrogacao_prazo_determinado"] == "01/12/2024"
+    r = dominio.preparar({"data_admissao": "01/10/2024", "contrato_experiencia": "1", "contagem_experiencia": "CLT",
+                          "dias_contrato_experiencia": "30", "dias_prorrogacao": "30"})
+    assert r.dados["fim_prazo_determinado"] == "30/10/2024"
+    assert r.dados["prorrogacao_prazo_determinado"] == "29/11/2024"
+    assert dominio.somar_meses(dominio.date(2024, 1, 31), 1) == dominio.date(2024, 2, 29)
+
+
 def test_validacoes_basicas():
     r = dominio.preparar({"cpf": "111.111.111-11", "endereco_cep": "2422", "sexo": "X", "data_admissao": "31/02/2024",
                           "ddd_telefone": "2", "estado_civil": "Casada"})

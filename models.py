@@ -105,6 +105,7 @@ class DadosAdmissao(BaseModel):
     tipo_conta: str = ""
 
     contrato_experiencia: str = ""
+    contagem_experiencia: str = ""  # CLT (padrão) | MES — só muda o cálculo de fim/prorrogação
     clausula_assecuratoria: str = ""
     dias_contrato_experiencia: str = ""
     inicio_prazo_determinado: str = ""
