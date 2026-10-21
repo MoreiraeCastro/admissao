@@ -86,61 +86,80 @@ async def _iniciar_limpeza_diaria() -> None:
 # Extração de dados via IA (Anthropic)
 # --------------------------------------------------------------------------
 
-SYSTEM_PROMPT = """Você é um assistente especialista em extrair dados cadastrais de documentos brasileiros a partir de imagens ou PDFs, para fins de admissão de funcionários.
+SYSTEM_PROMPT = """Você extrai dados cadastrais de documentos brasileiros (fotos, PDFs e arquivos Word) para a admissão de um funcionário. O RH confere tudo depois, então é melhor deixar um campo vazio do que chutar.
 
-Você pode receber vários documentos na mesma solicitação, sem limite de quantidade — por exemplo RG, CPF, CNH, CIN, comprovante de residência (conta de luz, água, telefone ou internet), certidões e outros. Combine as informações de TODOS os documentos enviados num único resultado: dados pessoais normalmente vêm do documento de identificação, e o endereço normalmente vem do comprovante de residência (mas também pode vir do próprio documento de identificação, quando presente). Se dois documentos trouxerem valores diferentes para o mesmo campo, prefira o documento oficial de identificação para dados pessoais e o comprovante mais recente para o endereço.
+Você pode receber vários documentos de uma vez. Combine as informações de TODOS num único resultado. Se dois documentos trouxerem valores diferentes para o mesmo campo, prefira o documento oficial de identificação para dados pessoais e o comprovante mais recente para o endereço, e registre a divergência em "duvidas".
 
-Analise cuidadosamente os documentos fornecidos e devolva a resposta APENAS como um objeto JSON válido — sem markdown, sem texto antes ou depois, sem comentários — contendo exatamente estas chaves:
+REGRAS GERAIS
+- Nunca invente nem deduza o que não está visível. Campo não encontrado = string vazia "".
+- Copie números de documento EXATAMENTE como impressos, com os ZEROS À ESQUERDA (ex.: CTPS "0012345" fica "0012345", nunca "12345"). Vale para RG, CTPS, série, CNH, número do endereço, telefone e qualquer outro número.
+- Datas sempre DD/MM/AAAA. CPF como 000.000.000-00. CEP só os 8 dígitos. UFs sempre a sigla de 2 letras.
+- Nomes de pessoas como estão no documento oficial (com acentos), sem abreviar.
+- Em "fontes", diga de qual arquivo (o nome que aparece em "Documento: ...") tirou cada campo preenchido.
+- Em "duvidas", liste os campos que você preencheu sem certeza (foto borrada, texto cortado, dígito ilegível, documentos que divergem), com o motivo em poucas palavras. Não liste campos vazios.
 
-{
-  "nome_completo": "",
-  "cpf": "",
-  "rg": "",
-  "rg_orgao_emissor": "",
-  "rg_uf_emissor": "",
-  "rg_data_emissao": "",
-  "data_nascimento": "",
-  "sexo": "",
-  "naturalidade_cidade": "",
-  "naturalidade_uf": "",
-  "nacionalidade": "",
-  "pais_nascimento": "",
-  "nome_mae": "",
-  "nome_pai": "",
-  "endereco_logradouro": "",
-  "endereco_numero": "",
-  "endereco_complemento": "",
-  "endereco_bairro": "",
-  "endereco_cidade": "",
-  "endereco_uf": "",
-  "endereco_cep": "",
-  "estado_civil": "",
-  "grau_instrucao": "",
-  "numero_ctps": "",
-  "serie_ctps": "",
-  "deficiente_fisico": "",
-  "email": "",
-  "ddd_telefone": "",
-  "telefone": "",
-  "ddd_contato_2": "",
-  "contato_2": ""
+ONDE ESTÁ CADA DADO, POR DOCUMENTO
+- CIN (Carteira de Identidade Nacional, modelo novo, a partir de 2022): o número do documento É o próprio CPF. Preencha "cpf" e deixe "rg" vazio (o sistema usa o CPF como identidade). Órgão expedidor e UF aparecem como "SSP/RJ", "DETRAN/RJ" etc.
+- RG antigo: o número do RG fica no campo "REGISTRO GERAL"; o órgão e a UF costumam vir juntos ("SSP/SP", "IFP-RJ", "DETRAN RJ") — separe a sigla em "rg_orgao_emissor" (ex.: "SSP", "IFP", "DETRAN") e a UF em "rg_uf_emissor". "Data de expedição" vai em "rg_data_emissao". Não confunda com a data de nascimento. Naturalidade aparece como "Cidade-UF".
+- CNH: o RG aparece no campo "DOC. IDENTIDADE / ÓRG. EMISSOR / UF" (ex.: "123456789 DETRAN RJ") — o número vai em "rg" e o órgão/UF nos campos próprios; isso NÃO é o número da CNH (registro). Filiação traz pai e mãe. A data de emissão da CNH não é a data de expedição do RG: só use se não houver RG/CIN e o campo "DOC. IDENTIDADE" não trouxer data (nesse caso deixe "rg_data_emissao" vazio).
+- CTPS física: "numero_ctps" é o número e "serie_ctps" a série (com a UF ao lado, que não entra na série). Mantenha os zeros à esquerda.
+- CTPS Digital (tela ou PDF do app): não tem série — o número da CTPS digital são os 7 primeiros dígitos do CPF e a série são os 4 últimos dígitos do CPF; só preencha assim se o documento for claramente a CTPS Digital.
+- Certidão de nascimento: nome, data de nascimento, naturalidade, filiação. Não prova estado civil.
+- Certidão de casamento: estado civil "C" (ou "D"/"V"/"J" se houver averbação de divórcio, óbito ou separação). Se a pessoa mudou o nome no casamento, o "nome_completo" é o nome ATUAL (o que consta no documento de identidade mais recente ou o "passou a assinar").
+- Comprovante de residência (luz, água, gás, telefone, internet, banco): use só o endereço. O titular da conta pode ser outra pessoa (pai, cônjuge, locador) — não use o nome dele para nada. Separe logradouro (com o tipo: "Rua", "Avenida"…), número, complemento (apto, bloco, casa, lote), bairro, cidade, UF e CEP.
+- Título de eleitor, certificado de reservista, PIS/NIS: não preenchem nenhum campo daqui, exceto nome/data de nascimento/filiação para confirmar os outros documentos.
+- Diploma, certificado ou histórico escolar: "grau_instrucao".
+- Ficha cadastral ou formulário preenchido pelo candidato: pode trazer telefone, e-mail, estado civil e escolaridade — use, mas registre em "duvidas" o que só aparece ali.
+
+CAMPOS ESPECÍFICOS
+- "sexo": "Masculino" ou "Feminino", quando estiver no documento.
+- "naturalidade_cidade" e "naturalidade_uf" separados (ex.: "Rio de Janeiro" e "RJ").
+- "nacionalidade" em texto para o contrato (ex.: "brasileira"). Brasileiro nato: "brasileira".
+- "estado_civil": só com certidão de casamento, averbação, certidão de óbito do cônjuge ou declaração de união estável — código: S=Solteiro, C=Casado, V=Viúvo, D=Divorciado, J=Separado judicialmente, U=União estável. Certidão de nascimento sozinha NÃO prova estado civil.
+- "grau_instrucao": só com diploma, certificado de conclusão ou histórico — código: 1=Analfabeto, 2=Fundamental I incompleto, 3=Fundamental I completo, 4=Fundamental II incompleto, 5=Fundamental II completo, 6=Médio incompleto, 7=Médio completo, 8=Superior incompleto, 9=Superior completo, 13=Pós-graduação, 10=Mestrado, 11=Doutorado.
+- "deficiente_fisico": "1" apenas se houver laudo médico de deficiência; senão vazio.
+- Telefones: DDD (2 dígitos) separado do número; só dígitos."""
+
+# Campos que a IA devolve (o resto é do RH ou calculado em dominio.py).
+CAMPOS_IA = [c for c in CAMPOS_ADMISSAO if c not in ("pais_nascimento", "conta_corrente", "digito_conta", "tipo_conta")]
+
+# Resposta com formato fixo (structured outputs): todos os campos sempre presentes e como texto
+# (texto preserva zeros à esquerda), + de onde veio cada um e o que ficou em dúvida.
+SCHEMA_EXTRACAO = {
+    "type": "object",
+    "properties": {
+        "dados": {
+            "type": "object",
+            "properties": {campo: {"type": "string"} for campo in CAMPOS_IA},
+            "required": CAMPOS_IA,
+            "additionalProperties": False,
+        },
+        "fontes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"campo": {"type": "string", "enum": CAMPOS_IA}, "documento": {"type": "string"}},
+                "required": ["campo", "documento"],
+                "additionalProperties": False,
+            },
+        },
+        "duvidas": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"campo": {"type": "string", "enum": CAMPOS_IA}, "motivo": {"type": "string"}},
+                "required": ["campo", "motivo"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["dados", "fontes", "duvidas"],
+    "additionalProperties": False,
 }
 
-Regras:
-- Nunca invente ou deduza informação que não esteja visível nos documentos. Se um campo não for encontrado em nenhum documento, use string vazia "".
-- Formate o CPF como 000.000.000-00 quando encontrado.
-- Formate datas como DD/MM/AAAA.
-- "sexo" deve ser "Masculino" ou "Feminino" quando identificável.
-- "rg_orgao_emissor" é a sigla do órgão emissor (ex: "SSP", "DETRAN"), separada da UF, que vai em "rg_uf_emissor" (ex: "RJ").
-- "naturalidade_cidade" e "naturalidade_uf" vêm separados (ex: cidade "Rio de Janeiro", uf "RJ"). UFs sempre como sigla de 2 letras.
-- "nacionalidade" em texto para o contrato (ex: "brasileira"); "pais_nascimento" é o nome do país de nascimento (ex: "BRASIL"), só se o documento mostrar ou se a naturalidade for uma cidade brasileira.
-- Os campos "endereco_*" vêm cada um separado (não junte tudo num só campo). "endereco_logradouro" inclui o tipo (ex: "Rua das Flores", "Avenida Brasil"). "endereco_cep" apenas números.
-- "estado_civil": só preencha com base em certidão de casamento, averbação de divórcio/separação, certidão de óbito do cônjuge ou declaração de união estável — use o código: S=Solteiro, C=Casado, V=Viúvo, D=Divorciado, J=Separado judicialmente, U=União estável. Certidão de nascimento sozinha NÃO prova estado civil: deixe vazio.
-- "grau_instrucao": só com diploma, certificado de conclusão ou histórico escolar — use o código: 1=Analfabeto, 2=Primário (fundamental I) incompleto, 3=Primário completo, 4=Ginásio (fundamental II) incompleto, 5=Ginásio completo, 6=2º grau (médio) incompleto, 7=2º grau completo, 8=Superior incompleto, 9=Superior completo, 13=Pós-graduação, 10=Mestrado, 11=Doutorado.
-- "numero_ctps" e "serie_ctps" da Carteira de Trabalho, quando enviada.
-- "deficiente_fisico": "1" apenas se houver laudo médico de deficiência; caso contrário deixe vazio.
-- Telefones: DDD (2 dígitos) separado do número, apenas dígitos.
-- Responda SOMENTE com o objeto JSON."""
+# Erros do validador (dominio.preparar) que valem uma segunda leitura, e em qual campo lido pela IA eles caem.
+CAMPO_LIDO_DO_ERRO = {"codigo_municipio_endereco": "endereco_cidade", "codigo_municipio_nascimento": "naturalidade_cidade"}
+
 
 IMAGE_MEDIA_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}
 
@@ -222,16 +241,6 @@ def _blocos_docx(nome: str, raw: bytes) -> list[dict]:
     return blocos
 
 
-def _extract_json(text: str) -> dict:
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if match:
-        return json.loads(match.group(0))
-    raise ValueError("A IA não retornou um JSON válido.")
-
 
 @app.post("/api/extrair")
 async def extrair_dados(documentos: List[UploadFile] = File(...)):
@@ -289,48 +298,81 @@ async def extrair_dados(documentos: List[UploadFile] = File(...)):
             detail=f"Os documentos somam {total_bytes / 1024 / 1024:.1f} MB — o limite por envio é de ~19 MB. Divida em dois envios.",
         )
 
-    content_blocks.append(
-        {
-            "type": "text",
-            "text": (
-                f"Extraia os dados cadastrais dos {sum(1 for b in content_blocks if b['type'] != 'text')} "
-                "documento(s) acima, combinando as informações de todos eles."
-            ),
-        }
-    )
-
+    quantidade = sum(1 for b in content_blocks if b["type"] != "text") or 1
+    # Cache no último documento: a segunda leitura reaproveita a mesma entrada (prompt + documentos) mais barato.
+    content_blocks[-1] = {**content_blocks[-1], "cache_control": {"type": "ephemeral"}}
     client = anthropic.Anthropic(api_key=api_key)
+
+    primeira = _ler_documentos(client, content_blocks, f"Extraia os dados cadastrais dos {quantidade} documento(s) acima, combinando as informações de todos eles.")
+    dados_ia = {campo: primeira["dados"].get(campo, "") for campo in CAMPOS_IA}
+    resultado = dominio.preparar(DadosAdmissao(**dados_ia).model_dump())
+
+    # Segunda leitura: só os campos lidos que o validador recusou (CPF que não fecha, data impossível, cidade que não existe…).
+    revisar = _campos_para_reler(resultado.erros, dados_ia)
+    relidos: list[str] = []
+    if revisar:
+        lista = "\n".join(f"- {campo}: você leu “{dados_ia.get(campo, '')}”, mas a conferência apontou: {motivo}" for campo, motivo in revisar.items())
+        try:
+            segunda = _ler_documentos(client, content_blocks, (
+                "Numa primeira leitura destes documentos, a conferência automática recusou os campos abaixo:\n"
+                f"{lista}\n\nReleia os documentos com atenção SÓ para esses campos (dígito por dígito, zeros à esquerda incluídos). "
+                "Devolva o resultado completo no mesmo formato; nos outros campos repita o que estiver nos documentos. "
+                "Se o documento realmente mostra o valor recusado, mantenha-o e explique em \"duvidas\"."
+            ))
+            for campo in revisar:
+                novo = segunda["dados"].get(campo, "")
+                if novo != dados_ia.get(campo, ""):
+                    dados_ia[campo] = novo
+                    relidos.append(campo)
+            primeira["duvidas"] = [d for d in primeira["duvidas"] if d["campo"] not in revisar] + [d for d in segunda["duvidas"] if d["campo"] in revisar]
+            resultado = dominio.preparar(DadosAdmissao(**dados_ia).model_dump())
+        except HTTPException:
+            pass  # a segunda leitura é um bônus: se falhar, fica a primeira, com os erros apontados para o RH
+
+    resposta = _resultado_json(resultado)
+    resposta["ia"] = {
+        "fontes": {f["campo"]: f["documento"] for f in primeira["fontes"] if dados_ia.get(f["campo"])},
+        "duvidas": {d["campo"]: d["motivo"] for d in primeira["duvidas"]},
+        "relidos": relidos,
+    }
+    return resposta
+
+
+def _campos_para_reler(erros: dict[str, str], dados_ia: dict[str, str]) -> dict[str, str]:
+    """Erros de conteúdo (não de campo em branco) em campos que a própria IA leu dos documentos."""
+    revisar: dict[str, str] = {}
+    for chave, erro in erros.items():
+        campo = CAMPO_LIDO_DO_ERRO.get(chave, chave)
+        if campo in CAMPOS_IA and dados_ia.get(campo) and not erro.startswith("Obrigatório"):
+            revisar[campo] = erro
+    return revisar
+
+
+def _ler_documentos(client, content_blocks: list[dict], pedido: str) -> dict:
+    """Uma leitura dos documentos com a resposta no formato fixo (SCHEMA_EXTRACAO)."""
+    import anthropic
 
     try:
         response = client.messages.create(
             model=ANTHROPIC_MODEL,
-            max_tokens=2048,
+            max_tokens=16000,
             system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": content_blocks}],
+            messages=[{"role": "user", "content": [*content_blocks, {"type": "text", "text": pedido}]}],
+            # SDK 0.40 não conhece estes parâmetros: vão direto no corpo/cabeçalho da requisição.
+            extra_body={"output_config": {"format": {"type": "json_schema", "schema": SCHEMA_EXTRACAO}}, "fallbacks": "default"},
+            extra_headers={"anthropic-beta": "server-side-fallback-2026-07-01"},
         )
     except anthropic.APIError as exc:
         raise HTTPException(status_code=502, detail=f"Erro ao chamar a API da Anthropic: {exc}")
-
-    texto_resposta = "".join(
-        block.text for block in response.content if getattr(block, "type", None) == "text"
-    )
-
+    if response.stop_reason == "refusal":
+        raise HTTPException(status_code=502, detail="A IA se recusou a ler estes documentos. Confira se são documentos pessoais do colaborador e tente de novo.")
+    if response.stop_reason == "max_tokens":
+        raise HTTPException(status_code=502, detail="A resposta da IA foi cortada. Tente enviar menos documentos por vez.")
+    texto = "".join(block.text for block in response.content if getattr(block, "type", None) == "text")
     try:
-        dados_brutos = _extract_json(texto_resposta)
-    except (ValueError, json.JSONDecodeError):
-        preview = texto_resposta.strip()[:500] or "(resposta vazia)"
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                "A IA retornou uma resposta que não pôde ser interpretada como JSON "
-                f"(stop_reason={response.stop_reason}). Resposta recebida: {preview}"
-            ),
-        )
-
-    dados = DadosAdmissao(**{k: str(dados_brutos.get(k) or "") for k in CAMPOS_ADMISSAO})
-    # Já devolve conferido contra a planilha do Domínio: códigos (país, estado civil…), calculados e pendências.
-    resposta = _resultado_json(dominio.preparar(dados.model_dump()))
-    return resposta
+        return json.loads(texto)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=502, detail=f"A IA retornou uma resposta fora do formato (stop_reason={response.stop_reason}).")
 
 
 def _resultado_json(resultado: dominio.Resultado) -> dict:

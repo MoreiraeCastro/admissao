@@ -446,7 +446,7 @@ const FIELD_GROUPS = [
 ];
 const FIELD_DEFS = FIELD_GROUPS.flatMap(group => group.fields);
 
-const state = {files: []};
+const state = {files: [], ia: {fontes: {}, duvidas: {}, relidos: []}};
 
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
@@ -555,6 +555,7 @@ extractBtn.addEventListener('click', async () => {
       throw new Error(data.detail || 'Falha ao extrair dados.');
     }
     statusLine.textContent = 'Extração concluída.';
+    state.ia = {fontes: {}, duvidas: {}, relidos: [], ...(data.ia || {})};
     renderResults(data);
   } catch (err) {
     statusLine.classList.add('err');
@@ -623,6 +624,7 @@ async function renderResults(resposta){
       if ((resposta.calculados || []).includes(def.key)) input.dataset.auto = '1';
       input.addEventListener(input.tagName === 'SELECT' ? 'change' : 'input', () => {
         delete input.dataset.auto; // o RH mexeu: daqui pra frente o cálculo não sobrescreve
+        input.dataset.mexido = '1'; // e a dúvida/fonte da IA deixa de valer para este campo
         agendarValidacao();
       });
     });
@@ -669,8 +671,13 @@ function aplicarConferencia(resultado){
     const input = document.getElementById(`field-${def.key}`);
     if (!wrap || !msg) return;
     const erro = (resultado.erros || {})[def.key];
-    const aviso = (resultado.avisos || {})[def.key];
+    const aviso = (resultado.avisos || {})[def.key] || (state.ia.duvidas[def.key] && !document.getElementById(`field-${def.key}`)?.dataset.mexido ? `IA em dúvida: ${state.ia.duvidas[def.key]} — confira no documento` : '');
     let dica = (resultado.dicas || {})[def.key] || '';
+    // O que a IA disse deste campo: de qual arquivo veio e se ficou em dúvida (o RH confere esses primeiro).
+    const duvidaIa = state.ia.duvidas[def.key];
+    const fonteIa = state.ia.fontes[def.key];
+    const relido = state.ia.relidos.includes(def.key);
+    if (fonteIa && !input?.dataset.mexido) dica = [dica, `lido de ${fonteIa}${relido ? ' (relido)' : ''}`].filter(Boolean).join(' · ');
     const falta = Boolean(erro) && /^Obrigatório no Domínio/.test(erro);
     const auto = input?.dataset.auto === '1';
     if (falta) faltando++; else if (erro) comErro++;
