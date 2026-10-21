@@ -163,6 +163,65 @@ def _build_content_block(content_type: str, data_b64: str) -> dict:
     }
 
 
+DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+# Imagens dentro do .docx (ex.: RG escaneado colado no Word) vão para a IA como imagem; a API aceita até ~5 MB cada.
+IMAGEM_POR_EXTENSAO = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp"}
+LIMITE_IMAGEM_DOCX = 5 * 1024 * 1024
+LIMITE_DESCOMPACTADO_DOCX = 60 * 1024 * 1024  # proteção contra .docx "bomba" (zip que explode ao abrir)
+
+
+def _eh_docx(content_type: str, nome: str) -> bool:
+    return content_type == DOCX_MEDIA_TYPE or nome.lower().endswith(".docx")
+
+
+def _blocos_docx(nome: str, raw: bytes) -> list[dict]:
+    """Texto do Word (parágrafos, tabelas, cabeçalho e rodapé) + as imagens coladas nele, como blocos para a IA."""
+    import base64
+    import io
+    import zipfile
+
+    from docx import Document
+
+    try:
+        arquivo_zip = zipfile.ZipFile(io.BytesIO(raw))
+        if sum(item.file_size for item in arquivo_zip.infolist()) > LIMITE_DESCOMPACTADO_DOCX:
+            raise ValueError("grande demais")
+        documento = Document(io.BytesIO(raw))
+    except Exception as erro:  # zip inválido, .doc antigo renomeado, arquivo corrompido…
+        raise HTTPException(status_code=400, detail=f"Não foi possível abrir “{nome}” como Word (.docx). Se for .doc antigo, salve como .docx ou PDF.") from erro
+
+    linhas: list[str] = []
+    for secao in documento.sections:
+        linhas += [p.text for p in secao.header.paragraphs]
+    linhas += [p.text for p in documento.paragraphs]
+    for tabela in documento.tables:
+        for linha in tabela.rows:
+            celulas: list[str] = []
+            for celula in linha.cells:
+                texto = celula.text.strip()
+                if texto and (not celulas or celulas[-1] != texto):  # células mescladas repetem o texto
+                    celulas.append(texto)
+            linhas.append(" | ".join(celulas))
+    for secao in documento.sections:
+        linhas += [p.text for p in secao.footer.paragraphs]
+    texto = "\n".join(linha.strip() for linha in linhas if linha and linha.strip())
+
+    blocos: list[dict] = [{"type": "text", "text": f"Documento: {nome} (Word)\n\n{texto or '(sem texto — veja as imagens abaixo)'}"}]
+    ignoradas = 0
+    for item in arquivo_zip.infolist():
+        if not item.filename.startswith("word/media/"):
+            continue
+        media_type = IMAGEM_POR_EXTENSAO.get(os.path.splitext(item.filename)[1].lower())
+        if not media_type or item.file_size > LIMITE_IMAGEM_DOCX:
+            ignoradas += 1  # EMF/WMF/TIFF do Word ou imagem grande demais para a IA
+            continue
+        blocos.append({"type": "text", "text": f"Imagem dentro de {nome}"})
+        blocos.append(_build_content_block(media_type, base64.b64encode(arquivo_zip.read(item)).decode("utf-8")))
+    if ignoradas:
+        blocos.append({"type": "text", "text": f"({ignoradas} imagem(ns) de {nome} não puderam ser lidas.)"})
+    return blocos
+
+
 def _extract_json(text: str) -> dict:
     try:
         return json.loads(text)
@@ -201,6 +260,10 @@ async def extrair_dados(documentos: List[UploadFile] = File(...)):
         if not raw:
             continue
         content_type = (upload.content_type or "").lower()
+        if _eh_docx(content_type, upload.filename or ""):
+            total_bytes += len(raw)
+            content_blocks += _blocos_docx(upload.filename or "documento.docx", raw)
+            continue
         if content_type != "application/pdf" and content_type not in IMAGE_MEDIA_TYPES:
             # Antes caía como "image/jpeg" e a IA recusava o pedido inteiro (ex.: HEIC do iPhone).
             nao_suportados.append(upload.filename or content_type or "arquivo")
@@ -215,7 +278,7 @@ async def extrair_dados(documentos: List[UploadFile] = File(...)):
             status_code=400,
             detail=(
                 "Formato não suportado pela IA: " + ", ".join(nao_suportados)
-                + ". Envie como JPG, PNG, WEBP ou PDF (no iPhone, tire print da foto ou exporte como JPG)."
+                + ". Envie como JPG, PNG, WEBP, PDF ou Word .docx (no iPhone, tire print da foto ou exporte como JPG)."
             ),
         )
     if not content_blocks:
