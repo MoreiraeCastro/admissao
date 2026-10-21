@@ -182,3 +182,21 @@ def test_erro_de_coluna_oculta_aparece_no_campo_visivel():
     r = dominio.preparar(entrada)
     assert r.dados["tipo_endereco"] == "99"
     assert "codigo_municipio_nascimento" not in r.erros and "naturalidade_cidade" in r.erros
+
+
+def test_padroes_do_rh_e_calculados_escondidos():
+    """21/10/2026: SEFIP, vínculos, sindical, PcD, tipo de admissão, qualificação, seguro e forma de cálculo com padrão;
+    FGTS, férias, horas e categoria eSocial só calculados (fora do formulário)."""
+    ocultos_ou_padrao = ("ocorrencia_sefip", "multiplos_vinculos", "pagou_contribuicao_sindical", "deficiente_fisico", "tipo_admissao",
+                         "situacao_qualificacao_cadastral", "recebia_seguro_desemprego", "forma_calculo_pagamento")
+    entrada = {k: v for k, v in ENTRADA_EXEMPLO.items() if k not in ocultos_ou_padrao}
+    r = dominio.preparar(entrada)
+    assert r.erros == {}, r.erros
+    assert [r.dados[k] for k in ocultos_ou_padrao] == ["0", "N", "N", "0", "1", "0", "0", "1"]
+    assert (r.dados["optante_fgts"], r.dados["data_opcao_fgts"], r.dados["vencimento_ferias"]) == ("S", "01/10/2024", "30/09/2025")
+    assert (r.dados["horas_dia"], r.dados["horas_mes"], r.dados["codigo_categoria_esocial"]) == ("7.33", "220.00", "101")
+    # Forma de pagamento (40) continua para o RH preencher.
+    sem_forma = dominio.preparar({k: v for k, v in entrada.items() if k != "forma_pagamento"})
+    assert sem_forma.erros.get("forma_pagamento") == "Obrigatório no Domínio."
+    # Jornada fora da tabela: o erro aparece em "horas por semana".
+    assert "horas_semana" in dominio.preparar({**entrada, "horas_semana": "42"}).erros

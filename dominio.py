@@ -430,6 +430,14 @@ def preparar(entrada: dict) -> Resultado:
     # Padrões do RH (21/10/2026): quase sempre mensalista e admissão normal — o formulário deixa trocar.
     calcular("categoria", "1")
     calcular("tipo_indicativo_admissao", "2")
+    calcular("ocorrencia_sefip", "0")
+    calcular("multiplos_vinculos", "N")
+    calcular("pagou_contribuicao_sindical", "N")
+    calcular("deficiente_fisico", "0")
+    calcular("tipo_admissao", "1")
+    calcular("situacao_qualificacao_cadastral", "0")
+    calcular("recebia_seguro_desemprego", "0")
+    calcular("forma_calculo_pagamento", "1")
     # Fora do formulário: a filial é a própria empresa em uso no Domínio; banco não é informado.
     calcular("codigo_filial", "1")
     calcular("tipo_conta", "1")
@@ -539,11 +547,20 @@ CAMPO_VISIVEL = {
     "codigo_filial": "codigo_empregado",
     "codigo_banco": "codigo_empregado",
     "tipo_conta": "codigo_empregado",
+    "optante_fgts": "data_admissao",
+    "data_opcao_fgts": "data_admissao",
+    "vencimento_ferias": "data_admissao",
+    "horas_dia": "horas_semana",
+    "horas_mes": "horas_semana",
+    "codigo_categoria_esocial": "vinculo_empregaticio",
 }
 ROTULO_OCULTO = {
     "tipo_endereco": "Tipo de endereço", "codigo_municipio_nascimento": "Município de nascimento",
     "pais_nascimento": "País de nascimento", "pais_nacionalidade": "País da nacionalidade", "pais_endereco": "País do endereço",
     "codigo_filial": "Código filial", "codigo_banco": "Código banco", "tipo_conta": "Tipo da conta",
+    "optante_fgts": "Optante do FGTS", "data_opcao_fgts": "Data de opção do FGTS", "vencimento_ferias": "Vencimento das férias",
+    "horas_dia": "Horas por dia (o sistema calcula para 44, 40, 36, 30, 25 ou 20 h por semana)", "horas_mes": "Horas por mês",
+    "codigo_categoria_esocial": "Categoria eSocial",
 }
 
 

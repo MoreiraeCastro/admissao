@@ -397,7 +397,6 @@ const FIELD_GROUPS = [
       {key:'salario', label:'Salário (ex.: 2500,00)'},
       {key:'data_admissao', label:'Data de admissão'},
       {key:'vinculo_empregaticio', label:'Vínculo empregatício', full:true},
-      {key:'codigo_categoria_esocial', label:'Código categoria eSocial'},
       {key:'codigo_esocial_empregado', label:'Código eSocial do empregado'},
       {key:'categoria', label:'Categoria'},
       {key:'tipo_indicativo_admissao', label:'Tipo indicativo admissão'},
@@ -409,18 +408,13 @@ const FIELD_GROUPS = [
     title: 'Jornada de trabalho',
     fields: [
       {key:'horas_semana', label:'Horas por semana (ex.: 44)'},
-      {key:'horas_dia', label:'Horas por dia'},
-      {key:'horas_mes', label:'Horas por mês'},
-      {key:'vencimento_ferias', label:'Vencimento das férias'},
       {key:'forma_calculo_pagamento', label:'Forma de cálculo'},
       {key:'forma_pagamento', label:'Forma de pagamento'}
     ]
   },
   {
-    title: 'FGTS, SEFIP e sindicato',
+    title: 'SEFIP e sindicato',
     fields: [
-      {key:'optante_fgts', label:'Optante do FGTS'},
-      {key:'data_opcao_fgts', label:'Data opção FGTS'},
       {key:'ocorrencia_sefip', label:'Ocorrência SEFIP', full:true},
       {key:'multiplos_vinculos', label:'Múltiplos vínculos'},
       {key:'pagou_contribuicao_sindical', label:'Pagou contr. sindical'}
