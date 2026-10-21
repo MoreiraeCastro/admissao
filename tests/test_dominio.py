@@ -159,3 +159,26 @@ if __name__ == "__main__":
                 falhas += 1
                 print(f"FALHA {nome}: {exc}")
     sys.exit(1 if falhas else 0)
+
+
+def test_campos_fora_do_formulario_saem_do_back():
+    """21/10/2026: banco (25-28), filial (5), tipo de endereço (51), município de nascimento (53) e países (44, 54, 55)
+    não aparecem no formulário; categoria (34) e indicativo (35) vêm com o padrão do RH."""
+    entrada = {k: v for k, v in ENTRADA_EXEMPLO.items() if k not in (
+        "codigo_banco", "conta_corrente", "digito_conta", "tipo_conta", "codigo_filial", "categoria", "tipo_indicativo_admissao")}
+    r = dominio.preparar(entrada)
+    assert r.erros == {}, r.erros
+    d = r.dados
+    assert (d["codigo_filial"], d["tipo_conta"], d.get("codigo_banco", "")) == ("1", "1", "")
+    assert (d["categoria"], d["tipo_indicativo_admissao"]) == ("1", "2")
+    assert (d["tipo_endereco"], d["pais_nascimento"], d["pais_nacionalidade"], d["pais_endereco"]) == ("33", "30", "30", "30")
+    assert d["codigo_municipio_nascimento"] == "4489"
+    # O RH ainda pode trocar os padrões.
+    assert dominio.preparar({**entrada, "categoria": "5"}).dados["categoria"] == "5"
+
+
+def test_erro_de_coluna_oculta_aparece_no_campo_visivel():
+    entrada = {**ENTRADA_EXEMPLO, "endereco_logradouro": "Xyz Teste", "naturalidade_cidade": "Cidade Que Nao Existe"}
+    r = dominio.preparar(entrada)
+    assert r.dados["tipo_endereco"] == "99"
+    assert "codigo_municipio_nascimento" not in r.erros and "naturalidade_cidade" in r.erros

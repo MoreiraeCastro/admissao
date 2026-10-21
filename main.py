@@ -118,10 +118,6 @@ Analise cuidadosamente os documentos fornecidos e devolva a resposta APENAS como
   "grau_instrucao": "",
   "numero_ctps": "",
   "serie_ctps": "",
-  "banco_identificado": "",
-  "conta_corrente": "",
-  "digito_conta": "",
-  "tipo_conta": "",
   "deficiente_fisico": "",
   "email": "",
   "ddd_telefone": "",
@@ -142,7 +138,6 @@ Regras:
 - "estado_civil": só preencha com base em certidão de casamento, averbação de divórcio/separação, certidão de óbito do cônjuge ou declaração de união estável — use o código: S=Solteiro, C=Casado, V=Viúvo, D=Divorciado, J=Separado judicialmente, U=União estável. Certidão de nascimento sozinha NÃO prova estado civil: deixe vazio.
 - "grau_instrucao": só com diploma, certificado de conclusão ou histórico escolar — use o código: 1=Analfabeto, 2=Primário (fundamental I) incompleto, 3=Primário completo, 4=Ginásio (fundamental II) incompleto, 5=Ginásio completo, 6=2º grau (médio) incompleto, 7=2º grau completo, 8=Superior incompleto, 9=Superior completo, 13=Pós-graduação, 10=Mestrado, 11=Doutorado.
 - "numero_ctps" e "serie_ctps" da Carteira de Trabalho, quando enviada.
-- Dados bancários só de cartão, extrato ou comprovante bancário em nome do colaborador: "banco_identificado" com nome e número do banco (ex: "Itaú (341)"), "conta_corrente" só os dígitos da conta sem o dígito verificador, "digito_conta" o dígito verificador, "tipo_conta" com o código 2=Conta corrente, 3=Conta salário, 4=Conta poupança.
 - "deficiente_fisico": "1" apenas se houver laudo médico de deficiência; caso contrário deixe vazio.
 - Telefones: DDD (2 dígitos) separado do número, apenas dígitos.
 - Responda SOMENTE com o objeto JSON."""
@@ -272,7 +267,6 @@ async def extrair_dados(documentos: List[UploadFile] = File(...)):
     dados = DadosAdmissao(**{k: str(dados_brutos.get(k) or "") for k in CAMPOS_ADMISSAO})
     # Já devolve conferido contra a planilha do Domínio: códigos (país, estado civil…), calculados e pendências.
     resposta = _resultado_json(dominio.preparar(dados.model_dump()))
-    resposta["banco_identificado"] = str(dados_brutos.get("banco_identificado") or "")
     return resposta
 
 

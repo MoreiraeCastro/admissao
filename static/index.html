@@ -352,7 +352,8 @@ const FIELD_GROUPS = [
       {key:'endereco_bairro', label:'Bairro'},
       {key:'endereco_cidade', label:'Cidade'},
       {key:'endereco_uf', label:'UF'},
-      {key:'endereco_cep', label:'CEP'}
+      {key:'endereco_cep', label:'CEP'},
+      {key:'codigo_municipio_endereco', label:'Município (código do Domínio)'}
     ]
   },
   {
@@ -363,15 +364,6 @@ const FIELD_GROUPS = [
       {key:'telefone', label:'Telefone'},
       {key:'ddd_contato_2', label:'DDD contato 2'},
       {key:'contato_2', label:'Contato 2'}
-    ]
-  },
-  {
-    title: 'Dados bancários',
-    fields: [
-      {key:'codigo_banco', label:'Código do banco (cadastro do Domínio)', full:true},
-      {key:'conta_corrente', label:'Conta corrente'},
-      {key:'digito_conta', label:'Dígito da conta'},
-      {key:'tipo_conta', label:'Tipo de conta', full:true}
     ]
   },
   {
@@ -390,7 +382,6 @@ const FIELD_GROUPS = [
     title: 'Vínculo e lotação — códigos do Domínio da empresa',
     fields: [
       {key:'codigo_empregado', label:'Código empregado'},
-      {key:'codigo_filial', label:'Código filial'},
       {key:'codigo_servico', label:'Código serviço'},
       {key:'codigo_cargo', label:'Código cargo'},
       {key:'codigo_departamento', label:'Código departamento'},
@@ -458,17 +449,6 @@ const FIELD_GROUPS = [
       {key:'situacao_qualificacao_cadastral', label:'Qualificação cadastral INSS/RF'}
     ]
   },
-  {
-    title: 'Códigos de tabela do Domínio (calculados — confira)',
-    fields: [
-      {key:'tipo_endereco', label:'Tipo de endereço', full:true},
-      {key:'codigo_municipio_endereco', label:'Município do endereço (código)'},
-      {key:'codigo_municipio_nascimento', label:'Município de nascimento (código)'},
-      {key:'pais_nacionalidade', label:'País da nacionalidade', full:true},
-      {key:'pais_nascimento', label:'País de nascimento', full:true},
-      {key:'pais_endereco', label:'País do endereço', full:true}
-    ]
-  }
 ];
 const FIELD_DEFS = FIELD_GROUPS.flatMap(group => group.fields);
 
@@ -593,7 +573,6 @@ extractBtn.addEventListener('click', async () => {
 // ---------- Formulário + conferência ao vivo contra a planilha do Domínio ----------
 let META = {};
 const metaPronta = fetch('api/campos').then(r => r.json()).then(m => { META = m; }).catch(() => {});
-let bancoIdentificado = '';
 
 function escapeHtml(texto){
   return String(texto ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -601,7 +580,6 @@ function escapeHtml(texto){
 
 async function renderResults(resposta){
   await metaPronta;
-  bancoIdentificado = resposta.banco_identificado || '';
   emptyState.style.display = 'none';
   resultsArea.style.display = 'flex';
   fieldsGrid.innerHTML = '';
@@ -699,7 +677,6 @@ function aplicarConferencia(resultado){
     const erro = (resultado.erros || {})[def.key];
     const aviso = (resultado.avisos || {})[def.key];
     let dica = (resultado.dicas || {})[def.key] || '';
-    if (def.key === 'codigo_banco' && bancoIdentificado) dica = `Documento mostra: ${bancoIdentificado} — use o código desse banco no cadastro do Domínio`;
     const falta = Boolean(erro) && /^Obrigatório no Domínio/.test(erro);
     const auto = input?.dataset.auto === '1';
     if (falta) faltando++; else if (erro) comErro++;

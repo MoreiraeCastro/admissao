@@ -197,7 +197,8 @@ POSICOES = [
     Posicao(22, "endereco_uf", "Sigla UF", True, "uf"),
     Posicao(23, "endereco_cep", "CEP", True, "digitos"),
     Posicao(24, "data_nascimento", "Data nascimento", True, "data"),
-    Posicao(25, "codigo_banco", "Código banco", True, "digitos"),
+    # Banco (25 a 28) saiu do formulário (pedido do RH em 21/10/2026): conta "não informada" e banco em branco.
+    Posicao(25, "codigo_banco", "Código banco", False, "digitos"),
     Posicao(26, "conta_corrente", "Número conta corrente", False, "digitos"),
     Posicao(27, "digito_conta", "Dígito conta corrente", False, "texto"),
     Posicao(28, "tipo_conta", "Tipo da conta", True, "opcao"),
@@ -426,6 +427,12 @@ def preparar(entrada: dict) -> Resultado:
     if admissao:
         calcular("vencimento_ferias", formatar_data(mais_um_ano_menos_um_dia(admissao)))
     calcular("optante_fgts", "S")
+    # Padrões do RH (21/10/2026): quase sempre mensalista e admissão normal — o formulário deixa trocar.
+    calcular("categoria", "1")
+    calcular("tipo_indicativo_admissao", "2")
+    # Fora do formulário: a filial é a própria empresa em uso no Domínio; banco não é informado.
+    calcular("codigo_filial", "1")
+    calcular("tipo_conta", "1")
     if dados.get("optante_fgts") == "S" and admissao:
         calcular("data_opcao_fgts", formatar_data(admissao))
 
@@ -437,13 +444,17 @@ def preparar(entrada: dict) -> Resultado:
     calcular("codigo_categoria_esocial", CATEGORIA_ESOCIAL_POR_VINCULO.get(dados.get("vinculo_empregaticio", ""), ""))
 
     primeira_palavra = normalizar_nome(dados.get("endereco_logradouro", "")).replace(".", " ").split(" ")[0] if dados.get("endereco_logradouro") else ""
-    calcular("tipo_endereco", TIPO_ENDERECO_POR_PREFIXO.get(primeira_palavra, ""))
+    # Fora do formulário: logradouro sem prefixo conhecido vai como "99 - Outro".
+    calcular("tipo_endereco", TIPO_ENDERECO_POR_PREFIXO.get(primeira_palavra, "99" if primeira_palavra else ""))
 
     calcular("codigo_municipio_endereco", codigo_municipio(dados.get("endereco_cidade", ""), dados.get("endereco_uf", "")))
     calcular("codigo_municipio_nascimento", codigo_municipio(dados.get("naturalidade_cidade", ""), dados.get("naturalidade_uf", "")))
     calcular("pais_endereco", PAIS_BRASIL if dados.get("endereco_uf") in UFS else "")
     calcular("pais_nascimento", PAIS_BRASIL if dados.get("naturalidade_uf") in UFS else "")
-    calcular("pais_nacionalidade", PAIS_BRASIL if dados.get("pais_nascimento") == PAIS_BRASIL else "")
+    # Estrangeiro: tenta o país pelo texto da nacionalidade do contrato (ex.: "Argentina").
+    pais_pelo_texto = str(PAISES.get(normalizar_nome(dados.get("nacionalidade", "")), ""))
+    calcular("pais_nascimento", pais_pelo_texto)
+    calcular("pais_nacionalidade", PAIS_BRASIL if dados.get("pais_nascimento") == PAIS_BRASIL else pais_pelo_texto)
 
     if dados.get("contrato_experiencia") == "1":
         if admissao:
@@ -499,8 +510,6 @@ def preparar(entrada: dict) -> Resultado:
         for chave in ("prorrogacao_prazo_determinado", "motivo_prorrogacao"):
             if not dados.get(chave) and chave not in r.erros:
                 r.erros[chave] = "Obrigatório quando há prorrogação."
-    if dados.get("forma_pagamento") == "C" and not dados.get("conta_corrente"):
-        r.avisos["conta_corrente"] = "Pagamento por crédito em conta sem número de conta."
 
     if admissao and (nascimento := parse_data(dados.get("data_nascimento", ""))):
         idade = (admissao - nascimento).days // 365
@@ -516,7 +525,36 @@ def preparar(entrada: dict) -> Resultado:
         r.dicas["naturalidade_cidade"] = f"→ Domínio: município {dados['codigo_municipio_nascimento']}"
     if not dados.get("rg") and dados.get("cpf"):
         r.dicas["rg"] = f"→ RG vazio: o Domínio vai usar o CPF ({dados['cpf']}) como identidade"
+    _levar_para_campo_visivel(r)
     return r
+
+
+# Colunas que não aparecem no formulário: o erro vai para o campo de onde o valor é calculado.
+CAMPO_VISIVEL = {
+    "tipo_endereco": "endereco_logradouro",
+    "codigo_municipio_nascimento": "naturalidade_cidade",
+    "pais_nascimento": "nacionalidade",
+    "pais_nacionalidade": "nacionalidade",
+    "pais_endereco": "endereco_uf",
+    "codigo_filial": "codigo_empregado",
+    "codigo_banco": "codigo_empregado",
+    "tipo_conta": "codigo_empregado",
+}
+ROTULO_OCULTO = {
+    "tipo_endereco": "Tipo de endereço", "codigo_municipio_nascimento": "Município de nascimento",
+    "pais_nascimento": "País de nascimento", "pais_nacionalidade": "País da nacionalidade", "pais_endereco": "País do endereço",
+    "codigo_filial": "Código filial", "codigo_banco": "Código banco", "tipo_conta": "Tipo da conta",
+}
+
+
+def _levar_para_campo_visivel(r: Resultado) -> None:
+    for oculto, visivel in CAMPO_VISIVEL.items():
+        erro = r.erros.pop(oculto, None)
+        if not erro:
+            continue
+        if erro.startswith("Obrigatório"):
+            erro = f"{ROTULO_OCULTO[oculto]} não foi calculado — confira este campo."
+        r.erros.setdefault(visivel, erro)
 
 
 def _conferir_municipio(r: Resultado, chave_codigo: str, chave_cidade: str, chave_uf: str, qual: str) -> None:
