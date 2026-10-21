@@ -625,13 +625,29 @@ async function renderResults(resposta){
       input.addEventListener(input.tagName === 'SELECT' ? 'change' : 'input', () => {
         delete input.dataset.auto; // o RH mexeu: daqui pra frente o cálculo não sobrescreve
         input.dataset.mexido = '1'; // e a dúvida/fonte da IA deixa de valer para este campo
+        if (def.key === 'contrato_experiencia') atualizarExperiencia();
         agendarValidacao();
       });
     });
     groupEl.appendChild(gridEl);
     fieldsGrid.appendChild(groupEl);
   });
+  atualizarExperiencia();
   aplicarConferencia(resposta);
+}
+
+// "Contrato de experiência?": as perguntas do contrato só aparecem quando é "1 — Possui".
+const CAMPOS_EXPERIENCIA = FIELD_GROUPS.find(group => group.fields.some(def => def.key === 'contrato_experiencia'))
+  .fields.map(def => def.key).filter(key => key !== 'contrato_experiencia');
+function temExperiencia(){
+  return document.getElementById('field-contrato_experiencia')?.value === '1';
+}
+function atualizarExperiencia(){
+  const mostrar = temExperiencia();
+  CAMPOS_EXPERIENCIA.forEach(key => {
+    const wrap = document.getElementById(`wrap-${key}`);
+    if (wrap) wrap.style.display = mostrar ? '' : 'none';
+  });
 }
 
 let timerValidacao;
@@ -701,8 +717,11 @@ function aplicarConferencia(resultado){
 // (e devolve em "calculados") — senão viravam "digitados" e não acompanhavam mais a data de admissão etc.
 function coletarDadosValidados({semCalculados = false} = {}){
   const dados = {};
+  const experiencia = temExperiencia();
   FIELD_DEFS.forEach(def => {
     const input = document.getElementById(`field-${def.key}`);
+    // Sem contrato de experiência, as perguntas escondidas vão vazias (não levam valor antigo para o TXT).
+    if (!experiencia && CAMPOS_EXPERIENCIA.includes(def.key)) { dados[def.key] = ''; return; }
     dados[def.key] = input && !(semCalculados && input.dataset.auto === '1') ? input.value.trim() : '';
   });
   return dados;
