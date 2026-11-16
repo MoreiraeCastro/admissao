@@ -41,6 +41,9 @@
   }
   .wrap{max-width:1180px;margin:0 auto;padding:40px 32px 80px;}
   header{margin-bottom:36px;}
+  /* Voltar ao portal do grupo (o mesmo botão em todas as ferramentas) */
+  .portal-back{display:inline-flex;align-items:center;gap:3px;height:30px;padding:0 11px 0 7px;margin-bottom:20px;border:1px solid var(--border);border-radius:999px;color:var(--ink-muted);font-size:12.5px;font-weight:600;text-decoration:none;white-space:nowrap;background:var(--surface);}
+  .portal-back:hover{background:var(--navy-soft);color:var(--navy);}
   .brand-logo{height:46px;width:auto;display:block;margin-bottom:22px;}
   .eyebrow{font-size:13px;color:var(--ink-muted);margin:0 0 6px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;}
   h1{font-size:28px;font-weight:600;margin:0 0 8px;letter-spacing:-0.02em;}
@@ -245,6 +248,7 @@
 <body>
 <div class="wrap">
   <header>
+    <a class="portal-back" href="/" title="Voltar ao portal"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M14.5 6l-6 6 6 6"/></svg>Portal</a>
     <img src="assets/logo-header.png" alt="Moreira & Castro — Assessoria Contábil" class="brand-logo">
     <p class="eyebrow">Automação de Admissão</p>
     <h1>Leitura de Documentos & Integração</h1>
