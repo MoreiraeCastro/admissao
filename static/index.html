@@ -220,6 +220,10 @@
   }
   .empty-title{margin:0 0 4px;font-size:14px;font-weight:600;color:var(--ink-strong);}
   .empty-state .empty-text{margin:0;font-size:13px;color:var(--text-2);max-width:300px;line-height:1.5;}
+  .rascunho{margin-top:16px;display:flex;flex-direction:column;align-items:center;gap:10px;}
+  .rascunho p{margin:0;font-size:13px;color:var(--text-1, inherit);}
+  .rascunho .acoes{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;}
+  .link-btn{background:none;border:0;padding:0;color:var(--text-2);font-size:12.5px;text-decoration:underline;cursor:pointer;}
 
   /* ---------- Formulário de conferência ---------- */
   .field{margin-bottom:14px;min-width:0;}
@@ -372,6 +376,14 @@
         <div class="empty-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l4 4v14H6zM14 3v4h4M9 11h6M9 14h6M9 17h4"/></svg></div>
         <p class="empty-title">Nenhum dado extraído ainda</p>
         <p class="empty-text">Envie os documentos ao lado e clique em “Extrair dados via IA” para revisar os campos aqui.</p>
+        <div class="rascunho" id="rascunhoBox" style="display:none">
+          <p id="rascunhoTexto"></p>
+          <div class="acoes">
+            <button class="primary" id="continuarBtn" type="button">Continuar de onde parou</button>
+            <button class="ghost" id="descartarBtn" type="button">Descartar</button>
+          </div>
+        </div>
+        <button class="link-btn" id="colarBtn" type="button" style="margin-top:14px">Colar dados copiados</button>
       </div>
 
       <div id="resultsArea" style="display:none;flex-direction:column;flex:1;">
@@ -539,6 +551,28 @@ const FIELD_DEFS = FIELD_GROUPS.flatMap(group => group.fields);
 
 const state = {files: [], ia: {fontes: {}, duvidas: {}, relidos: []}};
 
+// "Continuar de onde parou": o preenchimento fica salvo NESTE navegador (some ao gerar, ao descartar ou depois de 7 dias).
+const RASCUNHO = 'admissao-rascunho';
+const RASCUNHO_VALIDADE_MS = 7 * 24 * 3600 * 1000;
+function salvarRascunho(){
+  if (resultsArea.style.display === 'none') return;
+  try { localStorage.setItem(RASCUNHO, JSON.stringify({dados: coletarDadosValidados({semCalculados: true}), ia: state.ia, em: Date.now()})); } catch {}
+}
+function lerRascunho(){
+  try {
+    const r = JSON.parse(localStorage.getItem(RASCUNHO) || 'null');
+    if (r && r.dados && Date.now() - r.em < RASCUNHO_VALIDADE_MS) return r;
+    localStorage.removeItem(RASCUNHO);
+  } catch {}
+  return null;
+}
+function apagarRascunho(){ try { localStorage.removeItem(RASCUNHO); } catch {} }
+async function retomar(dados, ia){
+  state.ia = {fontes: {}, duvidas: {}, relidos: [], ...(ia || {})};
+  await renderResults({dados, ia: state.ia});
+  validarAgora();
+}
+
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
 const docList = document.getElementById('docList');
@@ -647,7 +681,8 @@ extractBtn.addEventListener('click', async () => {
     }
     statusLine.textContent = 'Extração concluída.';
     state.ia = {fontes: {}, duvidas: {}, relidos: [], ...(data.ia || {})};
-    renderResults(data);
+    await renderResults(data);
+    salvarRascunho();
   } catch (err) {
     statusLine.classList.add('err');
     statusLine.textContent = err.message;
@@ -764,6 +799,7 @@ function atualizarExperiencia(){
 
 let timerValidacao;
 function agendarValidacao(){
+  salvarRascunho();
   clearTimeout(timerValidacao);
   timerValidacao = setTimeout(validarAgora, 450);
 }
@@ -871,12 +907,40 @@ generateBtn.addEventListener('click', async () => {
     generateBtn.style.display = 'none';
     copyBtn.style.display = 'none';
     workflowFinal.style.display = 'flex';
+    apagarRascunho();
   } catch (err) {
     generateBtn.disabled = false;
     generateBtn.innerHTML = 'Aprovar e Gerar Contratos';
     alert(err.message);
   }
 });
+
+(function iniciarRascunho(){
+  const r = lerRascunho();
+  if (r) {
+    const nome = r.dados.nome_completo ? `<strong>${escapeHtml(r.dados.nome_completo)}</strong>, ` : '';
+    const quando = new Date(r.em).toLocaleString('pt-BR', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'});
+    document.getElementById('rascunhoTexto').innerHTML = `Tem uma admissão em andamento: ${nome}salva em ${quando}.`;
+    document.getElementById('rascunhoBox').style.display = '';
+  }
+  document.getElementById('continuarBtn').addEventListener('click', () => { const x = lerRascunho(); if (x) retomar(x.dados, x.ia); });
+  document.getElementById('descartarBtn').addEventListener('click', () => {
+    if (!confirm('Descartar a admissão em andamento? Os dados preenchidos serão apagados deste navegador.')) return;
+    apagarRascunho();
+    document.getElementById('rascunhoBox').style.display = 'none';
+  });
+  // Dados copiados pelo botão {} (inclusive de uma versão anterior desta tela).
+  document.getElementById('colarBtn').addEventListener('click', async () => {
+    let texto = '';
+    try { texto = await navigator.clipboard.readText(); } catch {}
+    if (!texto.trim().startsWith('{')) texto = prompt('Cole aqui os dados copiados pelo botão {}:') || '';
+    try {
+      const dados = JSON.parse(texto);
+      if (!dados || typeof dados !== 'object' || Array.isArray(dados)) throw new Error();
+      await retomar(dados, null);
+    } catch { if (texto) alert('Não reconheci os dados colados. Copie de novo pelo botão {} e tente outra vez.'); }
+  });
+})();
 
 copyBtn.addEventListener('click', () => {
   const dados = coletarDadosValidados();
