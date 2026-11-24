@@ -725,6 +725,11 @@ async function renderResults(resposta){
         delete input.dataset.auto; // o RH mexeu: daqui pra frente o cálculo não sobrescreve
         input.dataset.mexido = '1'; // e a dúvida/fonte da IA deixa de valer para este campo
         if (def.key === 'contrato_experiencia') atualizarExperiencia();
+        // Mexeu nos dias, no início ou na contagem: a data final volta a ser conta do sistema (início + dias).
+        (DEPENDENTES_DATA[def.key] || []).forEach(chave => {
+          const alvo = document.getElementById(`field-${chave}`);
+          if (alvo) { alvo.value = ''; alvo.dataset.auto = '1'; }
+        });
         agendarValidacao();
       });
     });
@@ -738,6 +743,14 @@ async function renderResults(resposta){
 // "Contrato de experiência?": as perguntas do contrato só aparecem quando é "1 — Possui".
 const CAMPOS_EXPERIENCIA = FIELD_GROUPS.find(group => group.fields.some(def => def.key === 'contrato_experiencia'))
   .fields.map(def => def.key).filter(key => key !== 'contrato_experiencia');
+const DEPENDENTES_DATA = {
+  data_admissao: ['inicio_prazo_determinado', 'fim_prazo_determinado', 'prorrogacao_prazo_determinado'],
+  inicio_prazo_determinado: ['fim_prazo_determinado', 'prorrogacao_prazo_determinado'],
+  dias_contrato_experiencia: ['fim_prazo_determinado', 'prorrogacao_prazo_determinado'],
+  contagem_experiencia: ['fim_prazo_determinado', 'prorrogacao_prazo_determinado'],
+  fim_prazo_determinado: ['prorrogacao_prazo_determinado'],
+  dias_prorrogacao: ['prorrogacao_prazo_determinado'],
+};
 function temExperiencia(){
   return document.getElementById('field-contrato_experiencia')?.value === '1';
 }
